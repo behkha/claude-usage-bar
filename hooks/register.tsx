@@ -58,7 +58,9 @@ const BLEED_Y = 1
 // Cells from the content's right edge at which the art stops; the plate, at least 128 px wide with its rail, covers that.
 const SCENE_STOP = 8
 const WIDEST_CELL = 8.8
-const NARROWEST_CELL = 6.8
+// Measured in the desktop app: a 767 px card drew the narrow plate, so it was under 96 cells wide and a cell
+// over 7.99 px. At 6.8 the card was taken for a fifth narrower than it is, and columns that fit were dropped.
+const NARROWEST_CELL = 8
 const stripShape = (bodyColumns: number) => {
   const cells = Math.max(20, bodyColumns + 5)
   // The plate carries the reset times once the pane has room for them.
