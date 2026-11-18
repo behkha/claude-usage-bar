@@ -57,7 +57,7 @@ declare module 'claude-code' {
       familyOpen: boolean
       mood: UsageBarMood | null
       fmOn: boolean
-      /** Which mode the band draws: `glass` or `classic`. */
+      /** Which mode the band draws: `glass`, `cluster` or `classic`. */
       scene: string
       ledger: UsageBarLedger | null
     }

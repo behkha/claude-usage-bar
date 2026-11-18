@@ -5,6 +5,8 @@ import type { UsageBarChild, UsageBarFamily, UsageBarLedger, UsageBarModelLimits
 import { BLACK_LOOK, BLACK_PROBLEM } from './black'
 import { RAIL, glassAlt, glassArt, glassPlate, limitsAlt } from './glass'
 import type { GlassInput } from './glass'
+import { clusterAlt, clusterArt, clusterCentre, clusterLimitsAlt, clusterPlate, driveModeAlt } from './cluster'
+import type { ClusterInput } from './cluster'
 import { ART_HEIGHT, SPACER, ZONE_HEIGHT } from './card'
 import type { Gauge } from './card'
 
@@ -22,18 +24,24 @@ const LEDGER_START: UsageBarLedger = { written: 0, read: 0, cacheRead: 0, cacheW
 const ledger = atom({ plugin: 'usage-bar', key: 'ledger' } as const, null)
 const ledgerOf = async ($: EngineInterface): Promise<UsageBarLedger> => ((await read($, ledger)) as UsageBarLedger | null) ?? LEDGER_START
 
-// ---------- the two modes ----------
-// The band draws the Glass card or the classic meters. The ◐ control switches
-// between them; the choice is shared by every session through the store.
-const CLASSIC = 'classic'
+// ---------- the three modes ----------
+// The band draws the Glass card, the Cluster card or the classic meters. The
+// half-disc control steps through them in that order; the choice is shared by
+// every session through the store.
 const GLASS = 'glass'
+const CLUSTER = 'cluster'
+const CLASSIC = 'classic'
+const SCENES = [GLASS, CLUSTER, CLASSIC] as const
+type Scene = (typeof SCENES)[number]
+/** The control's face in each mode: the disc turns a quarter with every step. */
+const SCENE_GLYPH: Record<Scene, string> = { glass: '◐', cluster: '◒', classic: '◑' }
 const SCENE_STORE = 'scene'
-const isScene = (v: unknown): v is string => v === GLASS || v === CLASSIC
+const isScene = (v: unknown): v is Scene => SCENES.some(s => s === v)
 /** The mode in force: anything else, such as a scene an earlier version stored, reads as Glass. */
-const modeOf = (v: unknown) => (v === CLASSIC ? CLASSIC : GLASS)
+const modeOf = (v: unknown): Scene => (isScene(v) ? v : GLASS)
 
 const switchScene = async ($: EngineInterface) => {
-  const to = modeOf(await read($, scene)) === GLASS ? CLASSIC : GLASS
+  const to = SCENES[(SCENES.indexOf(modeOf(await read($, scene))) + 1) % SCENES.length] ?? GLASS
   await update($, scene, () => to)
   await $.store.set(SCENE_STORE, to).catch(() => undefined)
 }
@@ -57,6 +65,8 @@ const BLEED_X = 2
 const BLEED_Y = 1
 // Cells from the content's right edge at which the art stops; the plate, at least 128 px wide with its rail, covers that.
 const SCENE_STOP = 8
+// The rail's width in cells: what stands centred on the card is centred left of the rail.
+const RAIL_CELLS = 4
 const WIDEST_CELL = 8.8
 // Measured in the desktop app: a 767 px card drew the narrow plate, so it was under 96 cells wide and a cell
 // over 7.99 px. At 6.8 the card was taken for a fifth narrower than it is, and columns that fit were dropped.
@@ -69,20 +79,82 @@ const stripShape = (bodyColumns: number) => {
   // Drawn for the widest the pane could be, up to 2400 px; placed for the narrowest.
   const cols = clamp(Math.round((cells * WIDEST_CELL + 48) / 2), 150, 1200)
   const layout = clamp(Math.round((cells * NARROWEST_CELL - plate - 16) / 2), 56, cols)
-  return { cols, layout, wide }
+  return { cols, layout, wide, narrow: cells * NARROWEST_CELL }
 }
 
-type Strip = { art: { source: string; width: number }; alt: string; plate: { source: string; width: number; height: number }; limits: string }
+/** A card as the band lays it: the art behind, a plate at the right end and, in a mode that has one, a drawing centred between them. */
+type Strip = {
+  art: { source: string; width: number }
+  alt: string
+  plate: { source: string; width: number; height: number }
+  limits: string
+  centre: { source: string; width: number; height: number; alt: string } | null
+}
 const strips = new Map<string, Strip>()
-const glassFor = (input: GlassInput): Strip => {
-  const key = JSON.stringify(input)
+const stripFor = (key: string, draw: () => Strip): Strip => {
   let hit = strips.get(key)
   if (!hit) {
-    hit = { art: glassArt(input), alt: glassAlt(input), plate: glassPlate(input), limits: limitsAlt(input) }
+    hit = draw()
     if (strips.size >= 8) strips.delete(strips.keys().next().value as string)
     strips.set(key, hit)
   }
   return hit
+}
+const glassFor = (input: GlassInput): Strip =>
+  stripFor(`${GLASS}${JSON.stringify(input)}`, () => ({ art: glassArt(input), alt: glassAlt(input), plate: glassPlate(input), limits: limitsAlt(input), centre: null }))
+const clusterFor = (input: ClusterInput): Strip =>
+  stripFor(`${CLUSTER}${JSON.stringify(input)}`, () => {
+    const centre = clusterCentre(input)
+    return {
+      art: clusterArt(input),
+      alt: clusterAlt(input),
+      plate: clusterPlate(input),
+      limits: clusterLimitsAlt(input),
+      centre: centre ? { ...centre, alt: driveModeAlt(input) } : null,
+    }
+  })
+
+/** What a card mode draws from: the card's shape, the limits, and the session's numbers. */
+type CardNumbers = {
+  shape: ReturnType<typeof stripShape>
+  five: Gauge | null
+  seven: Gauge | null
+  model: { name: string; gauge: Gauge } | null
+  context: { percent: number; tokens: number; window: number } | null
+  written: number
+  read: number
+  cache: number | null
+  usd: number | null
+  turns: number
+  tools: number
+  minutes: number
+  busy: boolean
+}
+/**
+ * The modes that draw the card, each from the same numbers. A mode with no line here (Classic) draws the band its own way.
+ * A new card mode is its drawing file, its line here, and its name and glyph among the scenes above.
+ */
+const CARDS: Partial<Record<Scene, (n: CardNumbers) => Strip>> = {
+  glass: n =>
+    glassFor({
+      width: n.shape.cols * 2,
+      seen: n.shape.layout * 2,
+      wide: n.shape.wide,
+      five: n.five,
+      seven: n.seven,
+      model: n.model,
+      context: n.context,
+      written: n.written,
+      read: n.read,
+      cache: n.cache,
+      usd: n.usd,
+      turns: n.turns,
+      tools: n.tools,
+      minutes: n.minutes,
+      busy: n.busy,
+    }),
+  cluster: n =>
+    clusterFor({ width: n.shape.cols * 2, narrow: n.shape.narrow, five: n.five, seven: n.seven, model: n.model, context: n.context, written: n.written, usd: n.usd, turns: n.turns, minutes: n.minutes }),
 }
 
 const HOUR = 3_600_000
@@ -1537,12 +1609,12 @@ export const register: Register = on => {
 
       const finished = fam ? finishedOf(fam.children) : 0
       const current = modeOf(await read($, scene))
-      // The two controls, the same in both modes. The half-disc turns over with the mode: ◐ on the Glass card,
-      // ◑ on the classic meters. Claude FM is a note at rest; while it plays, a clay stop and a moving equalizer.
+      // The two controls, the same in every mode. The half-disc turns with the mode: ◐ on the Glass card, ◒ on the
+      // Cluster card, ◑ on the classic meters. Claude FM is a note at rest; while it plays, a clay stop and a moving equalizer.
       // No `label` on these: the desktop app draws a label in place of the children, as words across the plate.
       const sceneButton = (
         <Button key="scene" plain onPress={() => void switchScene($)}>
-          <Text dimColor>{current === GLASS ? '◐' : '◑'}</Text>
+          <Text dimColor>{SCENE_GLYPH[current]}</Text>
         </Button>
       )
       const fmButton = (
@@ -1552,7 +1624,8 @@ export const register: Register = on => {
       )
       const fmPlaying = fm ? <Svg source={eq.source} alt={eq.alt} width={eq.width} height={eq.height} isInteractive /> : null
 
-      if (current === GLASS) {
+      const card = CARDS[current]
+      if (card) {
         const gauge = (kind: string): Gauge | null => {
           const r = rows.find(row => row.kind === kind)
           return r ? { percent: r.percent, pace: r.pace, left: r.left, level: r.level } : null
@@ -1563,10 +1636,8 @@ export const register: Register = on => {
         const modelGauge = modelRow ? gauge(modelRow.kind) : null
         const book = await ledgerOf($)
         const allRead = book.read + book.cacheRead + book.cacheWritten
-        const strip = glassFor({
-          width: shape.cols * 2,
-          seen: shape.layout * 2,
-          wide: shape.wide,
+        const strip = card({
+          shape,
           five: gauge('five_hour'),
           seven: gauge('seven_day'),
           model: modelRow && modelGauge ? { name: modelRow.kind.slice(MODEL_KIND.length).replace(/_/g, ' ').toUpperCase().slice(0, 6).trim(), gauge: modelGauge } : null,
@@ -1598,7 +1669,15 @@ export const register: Register = on => {
                   </Box>
                 </Box>
               </Box>
-              {/* The limits plate, over the art's right end. */}
+              {/* A mode's centred drawing, over the art and left of the rail. In a box that may not shrink, as the art is. */}
+              {strip.centre ? (
+                <Box position="absolute" top={-BLEED_Y} left={0} right={RAIL_CELLS} flexDirection="row" justifyContent="center">
+                  <Box flexShrink={0}>
+                    <Svg source={strip.centre.source} alt={strip.centre.alt} width={strip.centre.width} height={strip.centre.height} />
+                  </Box>
+                </Box>
+              ) : null}
+              {/* The plate, over the art's right end. */}
               <Box position="absolute" top={-BLEED_Y} right={-BLEED_X}>
                 <Svg source={strip.plate.source} alt={strip.limits} width={strip.plate.width} height={strip.plate.height} />
               </Box>

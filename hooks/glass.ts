@@ -8,7 +8,7 @@
 // The drawing is larger than the card and laid behind it: the card crops it,
 // and the corners are cut in the drawing itself (see card.ts).
 
-import { ART_HEIGHT, CARD_HEIGHT, CORNER, EDGE_SIDE, EDGE_TOP } from './card'
+import { ART_HEIGHT, CARD_HEIGHT, EDGE_SIDE, EDGE_TOP, cutLeft, cutRight, edgeLeft, edgeRight } from './card'
 import type { Gauge } from './card'
 
 export type GlassInput = {
@@ -44,8 +44,8 @@ const trim = (v: string) => v.replace(/\.0$/, '')
 export const short = (n: number) =>
   n >= 1e6 ? `${trim((n / 1e6).toFixed(n >= 1e7 ? 0 : 1))}M` : n >= 1e3 ? `${trim((n / 1e3).toFixed(n >= 1e5 ? 0 : 1))}k` : String(Math.round(n))
 // Both stay within five figures, so a column never outgrows its width.
-const clock = (minutes: number) => (minutes >= 6000 ? `${Math.floor(minutes / 60)}` : `${Math.floor(minutes / 60)}:${String(Math.floor(minutes % 60)).padStart(2, '0')}`)
-const dollars = (usd: number) => `$${usd < 99.995 ? usd.toFixed(2) : Math.round(usd)}`
+export const clock = (minutes: number) => (minutes >= 6000 ? `${Math.floor(minutes / 60)}` : `${Math.floor(minutes / 60)}:${String(Math.floor(minutes % 60)).padStart(2, '0')}`)
+export const dollars = (usd: number) => `$${usd < 99.995 ? usd.toFixed(2) : Math.round(usd)}`
 
 // Numerals: heavy rounded strokes on a 5 x 9 box. A mod cannot load a font, so the figures are drawn.
 const GLYPH: Record<string, string> = {
@@ -147,10 +147,6 @@ const STYLE =
   '.s{transform-box:fill-box;transform-origin:50% 100%;animation:s 2.2s ease-in-out infinite alternate}@keyframes s{from{transform:rotate(-1.2deg)}to{transform:rotate(1.2deg)}}' +
   '@media (prefers-reduced-motion: reduce){*{animation:none!important}}'
 
-// Half a pixel inside the measured edges, so a small error shows as a sliver of the card and never as a square tip of art.
-const TOP = EDGE_TOP + 0.5
-const BOTTOM = EDGE_TOP + CARD_HEIGHT - 0.5
-
 /** The card's left end and everything up to the plate: one SVG, `ART_HEIGHT` tall, with the card's two left corners cut. */
 export function glassArt(i: GlassInput): { source: string; width: number } {
   const ids: Ids = { n: 0 }
@@ -201,11 +197,8 @@ export function glassArt(i: GlassInput): { source: string; width: number } {
   })
 
   const sub = i.context ? label(22 + hero.w + 16, 76, `${short(i.context.tokens)} / ${short(i.context.window)}`, { size: 10, spacing: 0.3, opacity: 0.8 }) : ''
-  const r = CORNER
-  // the rim's path in card coordinates: along the top, round the two left corners, along the bottom
-  const edge = `M${W} 1.4H${r}A${r - 1.4} ${r - 1.4} 0 0 0 1.4 ${r}V${H - r}A${r - 1.4} ${r - 1.4} 0 0 0 ${r} ${H - 1.4}H${W}`
-  const l = EDGE_SIDE + 0.5
-  const cut = `M-99 ${TOP + r}H${l}A${r} ${r} 0 0 1 ${l + r} ${TOP}V-99H${W + 99}V999H${l + r}V${BOTTOM}A${r} ${r} 0 0 1 ${l} ${BOTTOM - r}H-99Z`
+  const edge = edgeLeft(W)
+  const cut = cutLeft(W)
 
   return {
     source:
@@ -256,10 +249,8 @@ export function glassPlate(i: GlassInput): { source: string; width: number; heig
   if (i.five) rows.push(['5H', i.five])
   if (i.seven) rows.push(['7D', i.seven])
   if (i.model) rows.push([i.model.name, i.model.gauge])
-  const r = CORNER
-  const edge = `M0 1.4H${inner - r}A${r - 1.4} ${r - 1.4} 0 0 1 ${inner - 1.4} ${r}V${H - r}A${r - 1.4} ${r - 1.4} 0 0 1 ${inner - r} ${H - 1.4}H0`
-  const x = inner - 0.5
-  const cut = `M999 ${TOP + r}H${x}A${r} ${r} 0 0 0 ${x - r} ${TOP}V-99H-99V999H${x - r}V${BOTTOM}A${r} ${r} 0 0 0 ${x} ${BOTTOM - r}H999Z`
+  const edge = edgeRight(inner)
+  const cut = cutRight(inner)
   return {
     source:
       `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${ART_HEIGHT}" viewBox="0 0 ${W} ${ART_HEIGHT}" preserveAspectRatio="xMaxYMin slice"><clipPath id="cut"><path d="${cut}"/></clipPath>` +
