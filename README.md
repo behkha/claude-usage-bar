@@ -12,9 +12,10 @@ A mod for Claude Code that draws a band above the prompt with the numbers of the
 - **Child sessions:** sessions this one started in the desktop app, with what each is doing and which one is waiting for you.
 - **Claude FM:** a button that plays and stops the Claude FM stream.
 
-The band has two modes, switched with the half-disc button (◐ / ◑):
+The band has three modes. The half-disc button steps through them (◐ Glass, ◒ Cluster, ◑ Classic):
 
 - **Glass:** one black card with the context figure, the session's numbers in columns, and the limits on a plate at the right end.
+- **Cluster:** the card as a car's instrument cluster, with a gauge at each end and the drive mode between them.
 - **Classic:** Clawd beside a row of meters.
 
 In a terminal the band is a few lines of text meters.
@@ -28,6 +29,28 @@ Context is the heavy figure over a dial. A heat glow rises from the card's botto
 The limits plate, with the rail of buttons at its right end: child sessions, the mode switch, and Claude FM playing.
 
 ![Close-up of the limits plate and the control rail](docs/images/limits.png)
+
+### Cluster
+
+![The Cluster card: a gauge at each end, the drive mode list between them, the session's numbers beside it](docs/images/cluster.png)
+
+The left gauge is context, with the tokens in the window under the figure. Cost, time and turns stand beside it.
+
+![Close-up of the context gauge and the session's numbers](docs/images/cluster-context.png)
+
+The right gauge reads two limits side by side: the weekly limit and the one your plan keeps for one model (Fable). Its bar is the weekly limit, the strip beside the bar is the model's, and the white notch outside the bar is the weekly pace: the share of the week gone by. The 5-hour limit, its reset time and the tokens written stand beside it.
+
+![Close-up of the weekly gauge, the 5-hour limit and the control rail](docs/images/cluster-limits.png)
+
+The drive mode is how hard the session pushes, and the whole card takes its colour:
+
+- **Eco**, teal: every limit runs 10 points or more under its pace.
+- **Normal**, gold.
+- **Sport**, red: a limit runs more than 10 points ahead of its pace or is at 90% or more, or context is at 90% or more. The bars bend at the top.
+
+![The Cluster card in Eco, Normal and Sport](docs/images/cluster-modes.png)
+
+In a narrow pane the numbers beside the list go first, the 5-hour limit with them, then the list; the gauges stay.
 
 ### Classic
 
@@ -78,6 +101,15 @@ claude --plugin-dir /path/to/claude-usage-bar
 ```
 
 Check it with `claude plugin validate .` and, once the engine has laid its types in `.claude-plugin/types/`, `tsc -p .`.
+
+### Adding a mode
+
+A mode that draws the card is four things:
+
+- **Its drawing:** a file in `hooks/` beside `glass.ts` and `cluster.ts`, which turns the session's numbers into SVG. `hooks/card.ts` has the card's size and corners.
+- **Its line in `CARDS`** in `hooks/register.tsx`, and its name and button glyph among the scenes there.
+- **Its pictures:** one line in `MODES` and its shots in `docs/pictures.ts`. `bun docs/pictures.ts` draws them into `docs/images/` with Google Chrome.
+- **Its section** in this file, under "What it shows".
 
 ## Credits
 
