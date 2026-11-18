@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A band above the prompt: context, session tokens and cost, the 5-hour, weekly and per-model limits, child sessions and Claude FM; keeps any other band below it",
   "types": "./types/index.d.ts",
+  "license": "MIT",
   "author": {
     "name": "behkha"
   }

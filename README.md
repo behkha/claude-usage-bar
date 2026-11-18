@@ -60,3 +60,7 @@ Check it with `claude plugin validate .` and, once the engine has laid its types
 ## Credits
 
 The context forecast is adapted from token-weather (anthropics/claude-code-playground, Apache-2.0). Clawd is drawn from Claude Code's own glyph tables.
+
+## License
+
+MIT, see [LICENSE](LICENSE). It covers this mod's own code. `hooks/make-colors.js` and `hooks/make-colors.d.ts` come unchanged from Claude Code's mod-authoring kit, and Clawd is Anthropic's; those stay under their owners' terms.
