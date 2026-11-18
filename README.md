@@ -2,6 +2,8 @@
 
 A mod for Claude Code that draws a band above the prompt with the numbers of the running session.
 
+![The Glass card: context, session numbers, limits and the control rail](docs/images/glass-card.png)
+
 ## What it shows
 
 - **Context:** how full the context window is, with the tokens in it and the window's size.
@@ -16,6 +18,26 @@ The band has two modes, switched with the half-disc button (◐ / ◑):
 - **Classic:** Clawd beside a row of meters.
 
 In a terminal the band is a few lines of text meters.
+
+### Glass
+
+Context is the heavy figure over a dial. A heat glow rises from the card's bottom edge as the window fills.
+
+![Close-up of the context figure and the first columns](docs/images/context.png)
+
+The limits plate, with the rail of buttons at its right end: child sessions, the mode switch, and Claude FM playing.
+
+![Close-up of the limits plate and the control rail](docs/images/limits.png)
+
+### Classic
+
+![The Classic band: Clawd at a laptop beside the meters](docs/images/classic.png)
+
+Clawd follows what the session does: coding, reading, designing, shipping, leading child sessions, proud of a shipped turn, asleep after a long pause.
+
+![Clawd in seven of his poses](docs/images/clawd.png)
+
+The pictures are drawn by the mod's own code with example numbers. They are not screenshots of the app.
 
 ## Install
 
