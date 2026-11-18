@@ -1,0 +1,10 @@
+# made by the operating system
+.DS_Store
+
+# earlier versions kept beside the files
+*.bak-*
+
+# the engine's API types, copied here for the editor; the engine lays its own in .claude-plugin/types/
+.claude/types/
+
+*.log
