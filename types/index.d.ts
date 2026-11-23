@@ -43,6 +43,18 @@ export type UsageBarLedger = {
   turns: number
 }
 
+/** The project the session runs in: the repository (the main one for a worktree), its owner on the remote, the branch, and the worktree's folder name; outside a repository, the folder. */
+export type UsageBarProject = {
+  name: string
+  owner: string | null
+  /** Null on a detached checkout. */
+  branch: string | null
+  /** The checked-out commit, 7 characters. */
+  revision: string | null
+  worktree: string | null
+  repo: boolean
+}
+
 /** One reading of the context window's fill, after a main-loop turn. */
 export type UsageBarReading = { tokens: number; window: number; percent: number }
 
@@ -60,6 +72,9 @@ declare module 'claude-code' {
       /** Which mode the band draws: `glass`, `cluster` or `classic`. */
       scene: string
       ledger: UsageBarLedger | null
+      project: UsageBarProject | null
+      /** When the project or its branch last changed, epoch ms: the tab plays its arrival for a moment after. */
+      projectSince: number
     }
   }
 }

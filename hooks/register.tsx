@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
-import type { UsageBarChild, UsageBarFamily, UsageBarLedger, UsageBarModelLimits, UsageBarMood, UsageBarReading, UsageBarWindow } from '../types'
+import type { UsageBarChild, UsageBarFamily, UsageBarLedger, UsageBarModelLimits, UsageBarMood, UsageBarProject, UsageBarReading, UsageBarWindow } from '../types'
 import { BLACK_LOOK, BLACK_PROBLEM } from './black'
 import { RAIL, glassAlt, glassArt, glassPlate, limitsAlt } from './glass'
 import type { GlassInput } from './glass'
@@ -9,6 +9,10 @@ import { clusterAlt, clusterArt, clusterCentre, clusterLimitsAlt, clusterPlate, 
 import type { ClusterInput } from './cluster'
 import { ART_HEIGHT, SPACER, ZONE_HEIGHT } from './card'
 import type { Gauge } from './card'
+import { branchLabel, detectProject, hexOf, projectAlt, sameProject } from './project'
+import { ARRIVAL_MS, CLASSIC_END, EDGE_INK, LIFT, classicTop, lift, tabbedArt } from './tab'
+import { textWidth } from './measure'
+import type { TabMotion } from './tab'
 
 const windows = atom({ plugin: 'usage-bar', key: 'windows' } as const, [])
 const modelLimits = atom({ plugin: 'usage-bar', key: 'modelLimits' } as const, null)
@@ -23,6 +27,31 @@ const scene = atom({ plugin: 'usage-bar', key: 'scene' } as const, 'glass')
 const LEDGER_START: UsageBarLedger = { written: 0, read: 0, cacheRead: 0, cacheWritten: 0, tools: 0, usd: null, startedAt: 0, turns: 0 }
 const ledger = atom({ plugin: 'usage-bar', key: 'ledger' } as const, null)
 const ledgerOf = async ($: EngineInterface): Promise<UsageBarLedger> => ((await read($, ledger)) as UsageBarLedger | null) ?? LEDGER_START
+
+// ---------- the project tab ----------
+// Which project the session is in, read again at the session's start, around each turn and on the 30 s clock,
+// so a branch switched in a shell shows within a turn. A change stamps `projectSince`, and the tab plays its
+// arrival for ARRIVAL_MS after, timed from that stamp, so a redraw meanwhile carries on where it stood; a
+// redraw once it is over drops the motion.
+const project = atom({ plugin: 'usage-bar', key: 'project' } as const, null)
+const projectSince = atom({ plugin: 'usage-bar', key: 'projectSince' } as const, 0)
+const syncProject = async ($: EngineInterface) => {
+  const found = await detectProject($)
+  if (!found || sameProject(found, (await read($, project)) as UsageBarProject | null)) return
+  await update($, project, () => found)
+  await update($, projectSince, () => Date.now())
+  $.clock.after(ARRIVAL_MS + 50, () => void update($, now, () => Date.now()))
+}
+const projectOf = async ($: EngineInterface) => (await read($, project)) as UsageBarProject | null
+const motionOf = async ($: EngineInterface, busy: boolean): Promise<TabMotion> => {
+  const at = Date.now()
+  return { elapsed: at - (await read($, projectSince)), now: at, busy }
+}
+/**
+ * A transparent drawing that only takes room: the taller zone above a lowered card, the gap that keeps the rail's buttons on it.
+ * Every drawing needs an `alt`: the desktop app drops one with an empty `alt`, and the room it held with it.
+ */
+const gap = (width: number, height: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="#000" fill-opacity="0"/></svg>`
 
 // ---------- the three modes ----------
 // The band draws the Glass card, the Cluster card or the classic meters. The
@@ -316,32 +345,6 @@ const SPARK_STEP = 3
 const GAP = 5
 const GAP_GROUP = 15
 const MOTION_MS = 2_500
-
-// Advance widths of the app's UI face (SF Pro Text at 12px, tabular figures),
-// in em, regular then semibold, measured in Chromium. Other glyphs use AVG.
-const ADVANCE: Record<string, readonly [number, number]> = {
-  ' ': [0.281, 0.266], '0': [0.630, 0.658], '1': [0.630, 0.658], '2': [0.630, 0.658], '3': [0.630, 0.658],
-  '4': [0.630, 0.658], '5': [0.630, 0.658], '6': [0.630, 0.658], '7': [0.630, 0.658], '8': [0.630, 0.658],
-  '9': [0.630, 0.658], '.': [0.297, 0.331], ',': [0.297, 0.331], ':': [0.297, 0.331], '%': [0.925, 0.999],
-  '$': [0.630, 0.658], '/': [0.305, 0.325], '+': [0.630, 0.658], '-': [0.472, 0.480], 'a': [0.552, 0.577],
-  'b': [0.614, 0.639], 'c': [0.560, 0.578], 'd': [0.614, 0.639], 'e': [0.571, 0.591], 'f': [0.362, 0.396],
-  'g': [0.609, 0.633], 'h': [0.588, 0.618], 'i': [0.247, 0.274], 'j': [0.247, 0.273], 'k': [0.543, 0.582],
-  'l': [0.253, 0.281], 'm': [0.870, 0.912], 'n': [0.584, 0.613], 'o': [0.591, 0.610], 'p': [0.610, 0.635],
-  'q': [0.609, 0.635], 'r': [0.391, 0.423], 's': [0.514, 0.542], 't': [0.363, 0.399], 'u': [0.584, 0.613],
-  'v': [0.542, 0.569], 'w': [0.774, 0.823], 'x': [0.524, 0.562], 'y': [0.543, 0.579], 'z': [0.539, 0.557],
-  'A': [0.674, 0.713], 'B': [0.657, 0.681], 'C': [0.716, 0.733], 'D': [0.727, 0.740], 'E': [0.596, 0.613],
-  'F': [0.572, 0.589], 'G': [0.747, 0.756], 'H': [0.742, 0.769], 'I': [0.268, 0.301], 'J': [0.538, 0.580],
-  'K': [0.659, 0.692], 'L': [0.568, 0.586], 'M': [0.874, 0.895], 'N': [0.742, 0.759], 'O': [0.771, 0.781],
-  'P': [0.635, 0.661], 'Q': [0.771, 0.781], 'R': [0.653, 0.681], 'S': [0.637, 0.663], 'T': [0.634, 0.651],
-  'U': [0.737, 0.752], 'V': [0.674, 0.706], 'W': [0.968, 0.996], 'X': [0.679, 0.712], 'Y': [0.655, 0.690],
-  'Z': [0.662, 0.671],
-}
-const AVG = [0.62, 0.65] as const
-// Arrows, dashes, symbols and other scripts run wider; count them as a full em.
-const WIDE = [1, 1] as const
-
-const textWidth = (text: string, bold: boolean) =>
-  [...text].reduce((sum, ch) => sum + (ADVANCE[ch] ?? (ch.charCodeAt(0) > 0x7e ? WIDE : AVG))[bold ? 1 : 0], 0) * FS
 
 // The app's colours, light then dark. Light is the claude.ai theme (text-100,
 // text-500, border, warning-100, danger-100, clay); dark is sampled from the
@@ -1453,12 +1456,15 @@ export const register: Register = on => {
       // no theme on this engine or surface
     }
     await loadLedger($).catch(() => undefined)
+    // Not awaited: the band draws at once, and the tab arrives when the project is known.
+    void syncProject($).catch(() => undefined)
     await refresh($)
     if ((await read($, readings)).length === 0) await takeReading($).catch(() => undefined)
     void syncModelLimits($, 0)
     // Keeps the reset countdowns moving between turns, and the model limit current in a session left idle.
     $.clock.every(30_000, () => {
       void refresh($)
+      void syncProject($).catch(() => undefined)
       void syncModelLimits($, MODEL_IDLE_MS)
     })
     // Children and their live states, for a session that started others.
@@ -1480,6 +1486,7 @@ export const register: Register = on => {
     // Back after a long pause: he wakes and waves first.
     const waking = m.lastTurnEnd > 0 && at - m.lastTurnEnd > SLEEP_MS
     await update($, mood, () => ({ ...m, activity: 'thinking', since: at, shipped: false, reaction: waking ? 'greeting' : null, until: waking ? at + REACTION_MS : 0 }))
+    if (!e.agentId) void syncProject($).catch(() => undefined)
 
     return next(e)
   })
@@ -1526,6 +1533,7 @@ export const register: Register = on => {
       await saveLedger($).catch(() => undefined)
       // Not awaited: the report is a request, and the turn does not wait for it.
       void syncModelLimits($, MODEL_AFTER_TURN_MS)
+      void syncProject($).catch(() => undefined)
     }
     // The forecast follows the main conversation's window, not a subagent's.
     if (!e.agentId) {
@@ -1653,6 +1661,13 @@ export const register: Register = on => {
         })
 
         const others = fam ? fam.needs + fam.working + fam.idle : 0
+        // With a project, every drawing of the card is lowered by the tab's height and the tab stands in the room above.
+        const proj = await projectOf($)
+        const up = proj ? LIFT : 0
+        const art = proj ? tabbedArt(strip.art, ART_HEIGHT, proj, await motionOf($, e.props.isWorking), current === CLUSTER ? EDGE_INK.cluster : EDGE_INK.glass) : strip.art.source
+        const plate = proj ? lift(strip.plate.source, strip.plate.width, strip.plate.height, true) : strip.plate.source
+        const centre = strip.centre && proj ? lift(strip.centre.source, strip.centre.width, strip.centre.height, false) : strip.centre?.source
+        const zone = proj ? gap(16, ZONE_HEIGHT + up) : SPACER
 
         return (
           <Box flexDirection="column">
@@ -1665,7 +1680,7 @@ export const register: Register = on => {
                     itself the app narrows a drawing to its box, and the drawing then scales down to fit. */}
                 <Box flexDirection="row" flexWrap="nowrap">
                   <Box flexShrink={0}>
-                    <Svg source={strip.art.source} alt={strip.alt} width={strip.art.width} height={ART_HEIGHT} isInteractive />
+                    <Svg source={art} alt={proj ? `${projectAlt(proj)}. ${strip.alt}` : strip.alt} width={strip.art.width} height={ART_HEIGHT + up} isInteractive />
                   </Box>
                 </Box>
               </Box>
@@ -1673,19 +1688,21 @@ export const register: Register = on => {
               {strip.centre ? (
                 <Box position="absolute" top={-BLEED_Y} left={0} right={RAIL_CELLS} flexDirection="row" justifyContent="center">
                   <Box flexShrink={0}>
-                    <Svg source={strip.centre.source} alt={strip.centre.alt} width={strip.centre.width} height={strip.centre.height} />
+                    <Svg source={centre ?? strip.centre.source} alt={strip.centre.alt} width={strip.centre.width} height={strip.centre.height + up} />
                   </Box>
                 </Box>
               ) : null}
               {/* The plate, over the art's right end. */}
               <Box position="absolute" top={-BLEED_Y} right={-BLEED_X}>
-                <Svg source={strip.plate.source} alt={strip.limits} width={strip.plate.width} height={strip.plate.height} />
+                <Svg source={plate} alt={strip.limits} width={strip.plate.width} height={strip.plate.height + up} />
               </Box>
               {/* What gives the zone its height. */}
-              <Svg source={SPACER} alt="Band" width={16} height={ZONE_HEIGHT} />
+              <Svg source={zone} alt="Band" width={16} height={ZONE_HEIGHT + up} />
               {/* The controls, one above the other over the plate's rail and centred in its height. The rail is the
                   card's last RAIL px; the zone ends a cell short of the card's edge, so the column reaches a cell past it. */}
               <Box position="absolute" top={0} bottom={0} right={-1} flexDirection="column" alignItems="center" justifyContent="center">
+                {/* Centred in the whole zone, the column sits half a tab high; a gap of a whole tab brings it back onto the card. */}
+                {up ? <Svg source={gap(1, up)} alt="Band" width={1} height={up} /> : null}
                 {fam && others > 0 ? (
                   <Button key="family" plain onPress={toggle}>
                     <Text color={fam.needs > 0 ? 'warning' : undefined} dimColor={fam.needs === 0}>{`${others}${open ? '▾' : '▸'}`}</Text>
@@ -1725,9 +1742,29 @@ export const register: Register = on => {
         fm,
       )
       const stage = clawdStage(behaviour, fm)
+      const proj = await projectOf($)
+      // Classic has no drawing behind it, so its top edge is drawn here: the tab rising from it, as in the card modes.
+      const motion = await motionOf($, e.props.isWorking)
+      const topWidth = stripShape(e.props.bodyColumns ?? 80).cols * 2
+      const top = proj ? classicTop(proj, motion, topWidth) : null
 
       return (
         <Box flexDirection="column">
+          {proj && top ? (
+            <Box position="relative">
+              <Box position="absolute" top={-BLEED_Y} left={-BLEED_X} right={SCENE_STOP} overflow="hidden">
+                <Box flexDirection="row" flexWrap="nowrap">
+                  <Box flexShrink={0}>
+                    <Svg source={top.left} alt={projectAlt(proj)} width={topWidth} height={top.height} isInteractive={motion.busy || motion.elapsed < ARRIVAL_MS} />
+                  </Box>
+                </Box>
+              </Box>
+              <Box position="absolute" top={-BLEED_Y} right={-BLEED_X}>
+                <Svg source={top.right} alt="Band" width={CLASSIC_END} height={top.height} />
+              </Box>
+              <Svg source={gap(16, LIFT)} alt="Band" width={16} height={LIFT} />
+            </Box>
+          ) : null}
           <Box flexDirection="row" alignItems="center">
             <Svg source={stage.source} alt={stage.alt} width={stage.width} height={stage.height} isInteractive />
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} marginLeft={1}>
@@ -1842,6 +1879,14 @@ export const register: Register = on => {
           ...childLines(c.children, depth + 1),
         ]
       })
+    const proj = await projectOf($)
+    const projectLine = proj ? (
+      <Box flexDirection="row">
+        <Text color={hexOf(proj.name)}>{'▍'}</Text>
+        <Text bold>{proj.name}</Text>
+        <Text dimColor>{`  ${proj.repo ? '⎇' : '▢'} ${branchLabel(proj)}${proj.worktree ? '  · worktree' : ''}`}</Text>
+      </Box>
+    ) : null
     const finished = fam ? finishedOf(fam.children) : 0
     const familyBlock = fam ? (
       <Box flexDirection="column">
@@ -1864,6 +1909,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" paddingX={1}>
+        {projectLine}
         {familyBlock}
         {pills}
         {forecast}

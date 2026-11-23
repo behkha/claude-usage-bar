@@ -6,6 +6,7 @@ A mod for Claude Code that draws a band above the prompt with the numbers of the
 
 ## What it shows
 
+- **Project:** a tab on the card with the repository, its branch and, in a worktree, a worktree chip, in a colour of the project's own.
 - **Context:** how full the context window is, with the tokens in it and the window's size.
 - **Session:** tokens written and read, the share of reads served from cache, cost, turns, tool calls and time.
 - **Limits:** the 5-hour and weekly windows, and the weekly limit your plan keeps for one model (Fable), each with its pace and reset time.
@@ -19,6 +20,19 @@ The band has three modes. The half-disc button steps through them (◐ Glass, �
 - **Classic:** Clawd beside a row of meters.
 
 In a terminal the band is a few lines of text meters.
+
+### The project tab
+
+With many sessions open across many repositories, the tab says which one this is. It rises from the card's top-left edge in every mode, and stands above Clawd in Classic.
+
+![Three sessions in three projects: a tab on each card with its name, branch and colour](docs/images/tab.png)
+
+- **Colour:** worked out from the repository's name, so a project has the same colour in every session. Orange and red are left to the card's heat and warnings.
+- **Branch:** cut with `…` past 24 characters; `HEAD` and the commit on a detached checkout; `folder` outside a repository.
+- **Worktree:** the tab names the main repository and adds a WORKTREE chip.
+- **Arrival:** when a session opens or its branch changes, the tab rises out of the card, its strip draws in and a sheen crosses the name. While Claude works, a light runs along the strip. Reduced motion keeps it still.
+
+In a terminal it is the band's first line: the name in bold after a bar in the project's colour, then the branch.
 
 ### Glass
 
@@ -88,6 +102,7 @@ Read this before installing: the mod does more than draw.
 - **Reads your account's usage report** from `api.anthropic.com` for the per-model limit, with the session's own credential, which stays with the host. It asks once at session start, at most once a minute after a turn, and every 10 minutes while idle. Nothing is sent anywhere else.
 - **Reads local session files** under `~/.claude/sessions`, `~/.claude/projects` and the desktop app's own records, to list child sessions. It runs `ps` and `tail` for that.
 - **Claude FM** opens the stream in a Google Chrome window through AppleScript and minimizes it; stopping closes that tab. macOS asks for permission the first time you press the button.
+- **Reads the repository** the session runs in for the project tab: through Claude Code's own version-control lookup, or on older versions by running `git rev-parse` and `git config --get remote.origin.url` at session start, around each turn and every 30 seconds.
 - **Keeps counts** per session in the mod's own store, so a reopened session carries on from where it stood.
 
 Child sessions and Claude FM work on macOS only. Elsewhere those parts stay hidden.
