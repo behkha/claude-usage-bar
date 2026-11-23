@@ -1,18 +1,22 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
-import type { UsageBarChild, UsageBarFamily, UsageBarLedger, UsageBarModelLimits, UsageBarMood, UsageBarProject, UsageBarReading, UsageBarWindow } from '../types'
+import type { UsageBarChild, UsageBarFamily, UsageBarFlaps, UsageBarLedger, UsageBarModelLimits, UsageBarMood, UsageBarProject, UsageBarReading, UsageBarWindow } from '../types'
 import { BLACK_LOOK, BLACK_PROBLEM } from './black'
 import { RAIL, glassAlt, glassArt, glassPlate, limitsAlt } from './glass'
 import type { GlassInput } from './glass'
 import { clusterAlt, clusterArt, clusterCentre, clusterLimitsAlt, clusterPlate, driveModeAlt } from './cluster'
 import type { ClusterInput } from './cluster'
+import { tunerAlt, tunerArt, tunerLimitsAlt, tunerPlate } from './tuner'
+import type { TunerInput } from './tuner'
+import { FLIP_MS, boardAlt, boardArt, boardFaces, boardLimitsAlt, boardPlate } from './board'
+import type { BoardInput } from './board'
 import { ART_HEIGHT, SPACER, ZONE_HEIGHT } from './card'
 import type { Gauge } from './card'
 import { branchLabel, detectProject, hexOf, projectAlt, sameProject } from './project'
-import { ARRIVAL_MS, CLASSIC_END, EDGE_INK, LIFT, classicTop, lift, tabbedArt } from './tab'
+import { ARRIVAL_MS, CLASSIC_END, LIFT, TAB_STYLE, classicTop, lift, tabbedArt } from './tab'
 import { textWidth } from './measure'
-import type { TabMotion } from './tab'
+import type { TabArt, TabMotion } from './tab'
 
 const windows = atom({ plugin: 'usage-bar', key: 'windows' } as const, [])
 const modelLimits = atom({ plugin: 'usage-bar', key: 'modelLimits' } as const, null)
@@ -53,17 +57,19 @@ const motionOf = async ($: EngineInterface, busy: boolean): Promise<TabMotion> =
  */
 const gap = (width: number, height: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="#000" fill-opacity="0"/></svg>`
 
-// ---------- the three modes ----------
-// The band draws the Glass card, the Cluster card or the classic meters. The
-// half-disc control steps through them in that order; the choice is shared by
-// every session through the store.
+// ---------- the modes ----------
+// The band draws the Glass card, the Cluster card, the Tuner card, the Board
+// card or the classic meters. The control steps through them in that order;
+// the choice is shared by every session through the store.
 const GLASS = 'glass'
 const CLUSTER = 'cluster'
+const TUNER = 'tuner'
+const BOARD = 'board'
 const CLASSIC = 'classic'
-const SCENES = [GLASS, CLUSTER, CLASSIC] as const
+const SCENES = [GLASS, CLUSTER, TUNER, BOARD, CLASSIC] as const
 type Scene = (typeof SCENES)[number]
-/** The control's face in each mode: the disc turns a quarter with every step. */
-const SCENE_GLYPH: Record<Scene, string> = { glass: '◐', cluster: '◒', classic: '◑' }
+/** The control's face in each mode, a glyph of its own: ◐ Glass, ◒ Cluster, ◓ Tuner, ▦ Board, ◑ Classic. */
+const SCENE_GLYPH: Record<Scene, string> = { glass: '◐', cluster: '◒', tuner: '◓', board: '▦', classic: '◑' }
 const SCENE_STORE = 'scene'
 const isScene = (v: unknown): v is Scene => SCENES.some(s => s === v)
 /** The mode in force: anything else, such as a scene an earlier version stored, reads as Glass. */
@@ -113,7 +119,7 @@ const stripShape = (bodyColumns: number) => {
 
 /** A card as the band lays it: the art behind, a plate at the right end and, in a mode that has one, a drawing centred between them. */
 type Strip = {
-  art: { source: string; width: number }
+  art: TabArt
   alt: string
   plate: { source: string; width: number; height: number }
   limits: string
@@ -143,6 +149,14 @@ const clusterFor = (input: ClusterInput): Strip =>
     }
   })
 
+const tunerFor = (input: TunerInput): Strip =>
+  stripFor(`${TUNER}${JSON.stringify(input)}`, () => ({ art: tunerArt(input), alt: tunerAlt(input), plate: tunerPlate(input), limits: tunerLimitsAlt(input), centre: null }))
+const boardFor = (input: BoardInput): Strip => {
+  const draw = () => ({ art: boardArt(input), alt: boardAlt(input), plate: boardPlate(input), limits: boardLimitsAlt(input), centre: null })
+  // A board that is turning is drawn anew on every redraw, so it is not kept: it would only push out the still ones.
+  return input.flip ? draw() : stripFor(`${BOARD}${JSON.stringify(input)}`, draw)
+}
+
 /** What a card mode draws from: the card's shape, the limits, and the session's numbers. */
 type CardNumbers = {
   shape: ReturnType<typeof stripShape>
@@ -158,10 +172,59 @@ type CardNumbers = {
   tools: number
   minutes: number
   busy: boolean
+  /** The Board's flaps that are turning over: what they showed before, and the ms since the change. */
+  flip: BoardInput['flip']
+}
+const boardInput = (n: CardNumbers): BoardInput => ({
+  width: n.shape.cols * 2,
+  narrow: n.shape.narrow,
+  wide: n.shape.wide,
+  five: n.five,
+  seven: n.seven,
+  model: n.model,
+  context: n.context,
+  written: n.written,
+  cache: n.cache,
+  usd: n.usd,
+  turns: n.turns,
+  tools: n.tools,
+  minutes: n.minutes,
+  flip: n.flip,
+})
+/**
+ * What each session's Board last showed, the faces it turned from and when, so a change turns its flaps once.
+ * Kept here, not in the plugin's state: the engine refuses a state write while the band draws.
+ */
+const boards = new Map<string, UsageBarFlaps>()
+/**
+ * Where the Board's flaps stand: when what they show differs from what was kept, the change is kept with the
+ * faces it turns from, and the band draws again once the turn is over, to draw them still. A Board that comes
+ * into view starts still; `forgetBoard` drops what was kept when another mode is drawn.
+ */
+const flipOf = async ($: EngineInterface, n: CardNumbers): Promise<BoardInput['flip']> => {
+  const faces = boardFaces(boardInput(n))
+  const key = await $.session.id()
+  const kept = boards.get(key)
+  const same = (a: Record<string, string>) => Object.keys(faces).length === Object.keys(a).length && Object.entries(faces).every(([k, v]) => a[k] === v)
+  if (!kept) {
+    boards.set(key, { faces, was: faces, since: 0 })
+    return null
+  }
+  if (!same(kept.faces)) {
+    boards.set(key, { faces, was: kept.faces, since: Date.now() })
+    $.clock.after(FLIP_MS + 50, () => void update($, now, () => Date.now()))
+  }
+  const state = boards.get(key)!
+  const elapsed = Date.now() - state.since
+  return elapsed < FLIP_MS ? { was: state.was, elapsed } : null
+}
+const forgetBoard = async ($: EngineInterface) => {
+  if (boards.size) boards.delete(await $.session.id())
 }
 /**
  * The modes that draw the card, each from the same numbers. A mode with no line here (Classic) draws the band its own way.
- * A new card mode is its drawing file, its line here, and its name and glyph among the scenes above.
+ * A new card mode is its drawing file, its line here, its name and glyph among the scenes above, and its look
+ * under the project tab in `TAB_STYLE` (tab.ts).
  */
 const CARDS: Partial<Record<Scene, (n: CardNumbers) => Strip>> = {
   glass: n =>
@@ -184,6 +247,22 @@ const CARDS: Partial<Record<Scene, (n: CardNumbers) => Strip>> = {
     }),
   cluster: n =>
     clusterFor({ width: n.shape.cols * 2, narrow: n.shape.narrow, five: n.five, seven: n.seven, model: n.model, context: n.context, written: n.written, usd: n.usd, turns: n.turns, minutes: n.minutes }),
+  tuner: n =>
+    tunerFor({
+      width: n.shape.cols * 2,
+      narrow: n.shape.narrow,
+      wide: n.shape.wide,
+      five: n.five,
+      seven: n.seven,
+      model: n.model,
+      context: n.context,
+      written: n.written,
+      cache: n.cache,
+      usd: n.usd,
+      turns: n.turns,
+      minutes: n.minutes,
+    }),
+  board: n => boardFor(boardInput(n)),
 }
 
 const HOUR = 3_600_000
@@ -1617,8 +1696,8 @@ export const register: Register = on => {
 
       const finished = fam ? finishedOf(fam.children) : 0
       const current = modeOf(await read($, scene))
-      // The two controls, the same in every mode. The half-disc turns with the mode: ◐ on the Glass card, ◒ on the
-      // Cluster card, ◑ on the classic meters. Claude FM is a note at rest; while it plays, a clay stop and a moving equalizer.
+      // The two controls, the same in every mode. The mode switch shows the mode: ◐ on the Glass card, ◒ on the
+      // Cluster card, ◓ on the Tuner card, ▦ on the Board card, ◑ on the classic meters. Claude FM is a note at rest; while it plays, a clay stop and a moving equalizer.
       // No `label` on these: the desktop app draws a label in place of the children, as words across the plate.
       const sceneButton = (
         <Button key="scene" plain onPress={() => void switchScene($)}>
@@ -1644,7 +1723,7 @@ export const register: Register = on => {
         const modelGauge = modelRow ? gauge(modelRow.kind) : null
         const book = await ledgerOf($)
         const allRead = book.read + book.cacheRead + book.cacheWritten
-        const strip = card({
+        const numbers: CardNumbers = {
           shape,
           five: gauge('five_hour'),
           seven: gauge('seven_day'),
@@ -1658,13 +1737,17 @@ export const register: Register = on => {
           tools: book.tools,
           minutes: book.startedAt > 0 ? Math.max(0, Math.floor((at - book.startedAt) / 60_000)) : 0,
           busy: e.props.isWorking,
-        })
+          flip: null,
+        }
+        if (current === BOARD) numbers.flip = await flipOf($, numbers)
+        else await forgetBoard($)
+        const strip = card(numbers)
 
         const others = fam ? fam.needs + fam.working + fam.idle : 0
         // With a project, every drawing of the card is lowered by the tab's height and the tab stands in the room above.
         const proj = await projectOf($)
         const up = proj ? LIFT : 0
-        const art = proj ? tabbedArt(strip.art, ART_HEIGHT, proj, await motionOf($, e.props.isWorking), current === CLUSTER ? EDGE_INK.cluster : EDGE_INK.glass) : strip.art.source
+        const art = proj ? tabbedArt(strip.art, ART_HEIGHT, proj, await motionOf($, e.props.isWorking), TAB_STYLE[current]) : strip.art.source
         const plate = proj ? lift(strip.plate.source, strip.plate.width, strip.plate.height, true) : strip.plate.source
         const centre = strip.centre && proj ? lift(strip.centre.source, strip.centre.width, strip.centre.height, false) : strip.centre?.source
         const zone = proj ? gap(16, ZONE_HEIGHT + up) : SPACER
@@ -1694,7 +1777,7 @@ export const register: Register = on => {
               ) : null}
               {/* The plate, over the art's right end. */}
               <Box position="absolute" top={-BLEED_Y} right={-BLEED_X}>
-                <Svg source={plate} alt={strip.limits} width={strip.plate.width} height={strip.plate.height + up} />
+                <Svg source={plate} alt={strip.limits} width={strip.plate.width} height={strip.plate.height + up} isInteractive={numbers.flip !== null} />
               </Box>
               {/* What gives the zone its height. */}
               <Svg source={zone} alt="Band" width={16} height={ZONE_HEIGHT + up} />

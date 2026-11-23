@@ -55,6 +55,9 @@ export type UsageBarProject = {
   repo: boolean
 }
 
+/** The Board mode's flaps: what each row shows now, what it showed before the last change, and when that change came, epoch ms. */
+export type UsageBarFlaps = { faces: Record<string, string>; was: Record<string, string>; since: number }
+
 /** One reading of the context window's fill, after a main-loop turn. */
 export type UsageBarReading = { tokens: number; window: number; percent: number }
 
@@ -69,7 +72,7 @@ declare module 'claude-code' {
       familyOpen: boolean
       mood: UsageBarMood | null
       fmOn: boolean
-      /** Which mode the band draws: `glass`, `cluster` or `classic`. */
+      /** Which mode the band draws: `glass`, `cluster`, `tuner`, `board` or `classic`. */
       scene: string
       ledger: UsageBarLedger | null
       project: UsageBarProject | null

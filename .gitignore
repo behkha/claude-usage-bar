@@ -8,3 +8,6 @@
 .claude/types/
 
 *.log
+
+# design prototypes, kept until their modes are ported into hooks/
+prototype/

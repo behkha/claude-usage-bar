@@ -19,7 +19,10 @@ import { ART_HEIGHT, CARD_HEIGHT, EDGE_SIDE, EDGE_TOP } from '../hooks/card'
 import type { Gauge } from '../hooks/card'
 import { clusterArt, clusterCentre, clusterPlate } from '../hooks/cluster'
 import { RAIL, glassArt, glassPlate } from '../hooks/glass'
-import { ARRIVAL_MS, EDGE_INK, LIFT, lift, tabbedArt } from '../hooks/tab'
+import { tunerArt, tunerPlate } from '../hooks/tuner'
+import { boardArt, boardPlate } from '../hooks/board'
+import { ARRIVAL_MS, LIFT, TAB_STYLE, lift, tabbedArt } from '../hooks/tab'
+import type { TabArt } from '../hooks/tab'
 import type { UsageBarProject } from '../types'
 
 // ---------- the example session ----------
@@ -30,16 +33,19 @@ type Numbers = {
   model: { name: string; gauge: Gauge } | null
   context: { percent: number; tokens: number; window: number } | null
   written: number
+  read: number
+  cache: number | null
   usd: number | null
   turns: number
+  tools: number
   minutes: number
 }
 const limit = (percent: number, pace: number, left: string, level: Gauge['level'] = 'ok'): Gauge => ({ percent, pace, left, level })
 // The session the README shows everywhere, then the same session with its limits barely touched, and pushed hard.
 const SESSIONS = {
-  normal: { context: { percent: 62, tokens: 620_000, window: 1_000_000 }, five: limit(34, 0.357, '3h 13m'), seven: limit(58, 0.679, '2d 6h'), model: { name: 'FABLE', gauge: limit(41, 0.679, '2d 6h') }, usd: 21.37, minutes: 318, turns: 61, written: 148_000 },
-  eco: { context: { percent: 18, tokens: 180_000, window: 1_000_000 }, five: limit(12, 0.5, '2h 30m'), seven: limit(31, 0.679, '2d 6h'), model: { name: 'FABLE', gauge: limit(22, 0.679, '2d 6h') }, usd: 3.42, minutes: 41, turns: 9, written: 21_400 },
-  sport: { context: { percent: 91, tokens: 910_000, window: 1_000_000 }, five: limit(81, 0.6, '2h 0m', 'ahead'), seven: limit(74, 0.679, '2d 6h'), model: { name: 'FABLE', gauge: limit(88, 0.679, '2d 6h', 'ahead') }, usd: 64.1, minutes: 505, turns: 118, written: 392_000 },
+  normal: { context: { percent: 62, tokens: 620_000, window: 1_000_000 }, five: limit(34, 0.357, '3h 13m'), seven: limit(58, 0.679, '2d 6h'), model: { name: 'FABLE', gauge: limit(41, 0.679, '2d 6h') }, usd: 21.37, minutes: 318, turns: 61, written: 148_000, read: 2_400_000, cache: 91, tools: 212 },
+  eco: { context: { percent: 18, tokens: 180_000, window: 1_000_000 }, five: limit(12, 0.5, '2h 30m'), seven: limit(31, 0.679, '2d 6h'), model: { name: 'FABLE', gauge: limit(22, 0.679, '2d 6h') }, usd: 3.42, minutes: 41, turns: 9, written: 21_400, read: 310_000, cache: 84, tools: 31 },
+  sport: { context: { percent: 91, tokens: 910_000, window: 1_000_000 }, five: limit(81, 0.6, '2h 0m', 'ahead'), seven: limit(74, 0.679, '2d 6h'), model: { name: 'FABLE', gauge: limit(88, 0.679, '2d 6h', 'ahead') }, usd: 64.1, minutes: 505, turns: 118, written: 392_000, read: 6_100_000, cache: 93, tools: 455 },
 } satisfies Record<string, Numbers>
 type Session = keyof typeof SESSIONS
 
@@ -47,19 +53,27 @@ type Session = keyof typeof SESSIONS
 
 /** A card's drawings: the art behind, the plate at the right end and, in a mode that has one, the drawing centred between them. */
 type Card = {
-  art: { source: string; width: number }
+  art: TabArt
   plate: { source: string; width: number; height: number }
   centre: { source: string; width: number; height: number } | null
 }
 /** How each card mode draws a session on a card `width` px wide. */
 const MODES = {
   glass: (n: Numbers, width: number): Card => {
-    const input = { ...n, width: 2400, seen: width - 300, wide: width >= 768, read: 2_400_000, cache: 91, tools: 212, busy: false }
+    const input = { ...n, width: 2400, seen: width - 300, wide: width >= 768, busy: false }
     return { art: glassArt(input), plate: glassPlate(input), centre: null }
   },
   cluster: (n: Numbers, width: number): Card => {
     const input = { ...n, width: 2400, narrow: width }
     return { art: clusterArt(input), plate: clusterPlate(input), centre: clusterCentre(input) }
+  },
+  tuner: (n: Numbers, width: number): Card => {
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768 }
+    return { art: tunerArt(input), plate: tunerPlate(input), centre: null }
+  },
+  board: (n: Numbers, width: number): Card => {
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768, flip: null }
+    return { art: boardArt(input), plate: boardPlate(input), centre: null }
   },
 } satisfies Record<string, (n: Numbers, width: number) => Card>
 type Mode = keyof typeof MODES
@@ -101,6 +115,15 @@ const PROJECTS: UsageBarProject[] = [
 ]
 const TABBED_W = 760
 const TABBED_GAP = 22
+/** A mode's whole card with the project tab above it, on the app's page, as the band shows it. */
+const tabbed = (mode: Mode, file: string): Shot => ({
+  file,
+  scale: 2,
+  ground: '#0a0a0a',
+  width: WHOLE + 2 * MARGIN_X,
+  height: CARD_HEIGHT + LIFT + 2 * MARGIN_Y,
+  cards: [{ ...whole(mode, 'normal'), project: PROJECTS[0] }],
+})
 
 const SHOTS: Shot[] = [
   { file: 'cluster.png', width: WHOLE + 2 * MARGIN_X, height: CARD_HEIGHT + 2 * MARGIN_Y, scale: 2, cards: [whole('cluster', 'normal')] },
@@ -108,6 +131,10 @@ const SHOTS: Shot[] = [
   { file: 'cluster-context.png', width: 480, height: CARD_HEIGHT + 2 * MARGIN_Y, scale: 3, fade: 'right', cards: [whole('cluster', 'normal')] },
   { file: 'cluster-limits.png', width: 430, height: CARD_HEIGHT + 2 * MARGIN_Y, scale: 3, fade: 'left', cards: [{ ...whole('cluster', 'normal'), left: 430 - MARGIN_X - WHOLE }] },
   { file: 'cluster-modes.png', scale: 2, ...stack('cluster', ['eco', 'normal', 'sport'], 620, 18) },
+  tabbed('tuner', 'tuner.png'),
+  { file: 'tuner-sessions.png', scale: 2, ...stack('tuner', ['eco', 'normal', 'sport'], 780, 18) },
+  tabbed('board', 'board.png'),
+  { file: 'board-sessions.png', scale: 2, ...stack('board', ['eco', 'normal', 'sport'], 780, 18) },
   {
     file: 'tab.png',
     scale: 2,
@@ -123,10 +150,16 @@ const SHOTS: Shot[] = [
 const uri = (svg: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
 
 // The rail's buttons are the app's own, not drawings of the mod: child sessions, the mode switch, Claude FM.
-const RAIL_BUTTONS =
+// The mode switch shows the mode's glyph: a disc with the half filled that each mode fills, or Board's grid.
+const HALF: Partial<Record<Mode, number>> = { glass: 90, cluster: 0, tuner: 180 }
+const modeGlyph = (mode: Mode) =>
+  mode === 'board'
+    ? '<g fill="none" stroke="#9a9a9a" stroke-width="1.1"><rect x="10.8" y="41.3" width="10.4" height="10.4"/><path d="M14.3 41.3v10.4M17.7 41.3v10.4M10.8 44.8h10.4M10.8 48.2h10.4"/></g>'
+    : `<circle cx="16" cy="46.5" r="5.2" fill="none" stroke="#9a9a9a" stroke-width="1.1"/><path d="M10.8 46.5a5.2 5.2 0 0 0 10.4 0Z" transform="rotate(${HALF[mode] ?? 0} 16 46.5)"/>`
+const railButtons = (mode: Mode) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${RAIL}" height="${CARD_HEIGHT}" viewBox="0 0 ${RAIL} ${CARD_HEIGHT}" font-family="-apple-system,system-ui,sans-serif" fill="#9a9a9a">` +
   '<text x="16" y="31" font-size="12" text-anchor="middle">3▸</text>' +
-  '<circle cx="16" cy="46.5" r="5.2" fill="none" stroke="#9a9a9a" stroke-width="1.1"/><path d="M10.8 46.5a5.2 5.2 0 0 0 10.4 0Z"/>' +
+  modeGlyph(mode) +
   '<text x="16" y="71" font-size="13" text-anchor="middle">♪</text></svg>'
 
 const cardHtml = (p: Placed) => {
@@ -135,7 +168,7 @@ const cardHtml = (p: Placed) => {
   const up = p.project ? LIFT : 0
   const card: Card = p.project
     ? {
-        art: { source: tabbedArt(drawn.art, ART_HEIGHT, p.project, { elapsed: ARRIVAL_MS, now: 0, busy: false }, EDGE_INK[p.mode]), width: drawn.art.width },
+        art: { source: tabbedArt(drawn.art, ART_HEIGHT, p.project, { elapsed: ARRIVAL_MS, now: 0, busy: false }, TAB_STYLE[p.mode]), width: drawn.art.width },
         plate: { ...drawn.plate, source: lift(drawn.plate.source, drawn.plate.width, drawn.plate.height, true), height: drawn.plate.height + up },
         centre: drawn.centre ? { ...drawn.centre, source: lift(drawn.centre.source, drawn.centre.width, drawn.centre.height, false), height: drawn.centre.height + up } : null,
       }
@@ -147,7 +180,7 @@ const cardHtml = (p: Placed) => {
     `<div style="position:absolute;top:${-EDGE_TOP}px;left:${-EDGE_SIDE}px;right:${RAIL * 2}px;height:${CARD_HEIGHT + 2 * EDGE_TOP + up}px;overflow:hidden">${img(card.art, CARD_HEIGHT + 2 * EDGE_TOP + 1 + up, 'max-width:none')}</div>` +
     (card.centre ? `<div style="position:absolute;top:${-EDGE_TOP}px;left:0;right:${RAIL}px;display:flex;justify-content:center">${img(card.centre, card.centre.height, '')}</div>` : '') +
     img(card.plate, card.plate.height, `position:absolute;top:${-EDGE_TOP}px;right:${-EDGE_SIDE}px`) +
-    `<img src="${uri(RAIL_BUTTONS)}" width="${RAIL}" height="${CARD_HEIGHT}" style="position:absolute;top:${up}px;right:0">` +
+    `<img src="${uri(railButtons(p.mode))}" width="${RAIL}" height="${CARD_HEIGHT}" style="position:absolute;top:${up}px;right:0">` +
     '</div>'
   )
 }

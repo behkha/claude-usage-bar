@@ -13,10 +13,12 @@ A mod for Claude Code that draws a band above the prompt with the numbers of the
 - **Child sessions:** sessions this one started in the desktop app, with what each is doing and which one is waiting for you.
 - **Claude FM:** a button that plays and stops the Claude FM stream.
 
-The band has three modes. The half-disc button steps through them (◐ Glass, ◒ Cluster, ◑ Classic):
+The band has five modes. The mode button steps through them (◐ Glass, ◒ Cluster, ◓ Tuner, ▦ Board, ◑ Classic):
 
 - **Glass:** one black card with the context figure, the session's numbers in columns, and the limits on a plate at the right end.
 - **Cluster:** the card as a car's instrument cluster, with a gauge at each end and the drive mode between them.
+- **Tuner:** the card as the backlit dial of an old radio, with the context window as its scale.
+- **Board:** the card as a split-flap departure board.
 - **Classic:** Clawd beside a row of meters.
 
 In a terminal the band is a few lines of text meters.
@@ -27,10 +29,10 @@ With many sessions open across many repositories, the tab says which one this is
 
 ![Three sessions in three projects: a tab on each card with its name, branch and colour](docs/images/tab.png)
 
-- **Colour:** worked out from the repository's name, so a project has the same colour in every session. Orange and red are left to the card's heat and warnings.
+- **Colour:** on the monogram and the worktree chip, worked out from the repository's name, so a project has the same colour in every session. Orange and red are left to the card's heat and warnings. The tab's outline and fill are the card's own, in every mode.
 - **Branch:** cut with `…` past 24 characters; `HEAD` and the commit on a detached checkout; `folder` outside a repository.
 - **Worktree:** the tab names the main repository and adds a WORKTREE chip.
-- **Arrival:** when a session opens or its branch changes, the tab rises out of the card, its strip draws in and a sheen crosses the name. While Claude works, a light runs along the strip. Reduced motion keeps it still.
+- **Arrival:** when a session opens or its branch changes, the tab rises out of the card, the monogram pops and a sheen crosses the name. While Claude works, a light runs along the tab's top edge. Reduced motion keeps it still.
 
 In a terminal it is the band's first line: the name in bold after a bar in the project's colour, then the branch.
 
@@ -65,6 +67,28 @@ The drive mode is how hard the session pushes, and the whole card takes its colo
 ![The Cluster card in Eco, Normal and Sport](docs/images/cluster-modes.png)
 
 In a narrow pane the numbers beside the list go first, the 5-hour limit with them, then the list; the gauges stay.
+
+### Tuner
+
+![The Tuner card: the context figure, the dial with its amber needle, the session's numbers along its foot, and the limits on the plate](docs/images/tuner.png)
+
+The dial is the context window in tokens, and the needle stands where the window is filled. The session's numbers are printed along its foot like station names: cost, time, turns, tokens written and the share of reads served from cache, as many as the pane has room for.
+
+On the plate each limit has a short scale of its own. The amber needle is what is used, and the hollow pointer above the scale is the pace: the share of the window gone by. A needle well past its pointer runs ahead and turns orange; near the limit's end it turns red. The wide plate adds each limit's reset time.
+
+![The Tuner card in a calm, a steady and a pushed session](docs/images/tuner-sessions.png)
+
+### Board
+
+![The Board card: the session's numbers in split flaps, and the limits listed like flights](docs/images/board.png)
+
+Each number is a row of flaps under its name, with a line beneath: context and its tokens, cost, time, turns and tool calls, tokens written, and the share of reads served from cache. A narrow pane drops them from the right.
+
+The plate lists the limits like flights: the percent in flaps and, on the wide plate, how the limit runs against its pace. **On time**, **Ahead** in amber, **Final call** in red at 90% or more.
+
+When a figure changes, its flaps turn over one after another. Reduced motion shows the new figure at once.
+
+![The Board card in a calm, a steady and a pushed session](docs/images/board-sessions.png)
 
 ### Classic
 
@@ -119,10 +143,11 @@ Check it with `claude plugin validate .` and, once the engine has laid its types
 
 ### Adding a mode
 
-A mode that draws the card is four things:
+A mode that draws the card is five things:
 
-- **Its drawing:** a file in `hooks/` beside `glass.ts` and `cluster.ts`, which turns the session's numbers into SVG. `hooks/card.ts` has the card's size and corners.
+- **Its drawing:** a file in `hooks/` beside `glass.ts`, `cluster.ts`, `tuner.ts` and `board.ts`, which turns the session's numbers into SVG. `hooks/card.ts` has the card's size and corners, and the frame of the card's two ends (`leftEnd`, `rightEnd`).
 - **Its line in `CARDS`** in `hooks/register.tsx`, and its name and button glyph among the scenes there.
+- **Its look under the project tab** in `TAB_STYLE` in `hooks/tab.ts`: the edge's brightness and colour and the card's ground, so the tab reads as part of the card.
 - **Its pictures:** one line in `MODES` and its shots in `docs/pictures.ts`. `bun docs/pictures.ts` draws them into `docs/images/` with Google Chrome.
 - **Its section** in this file, under "What it shows".
 

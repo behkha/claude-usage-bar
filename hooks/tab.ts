@@ -1,7 +1,8 @@
 // The project tab: a folder tab rising from the card's top-left edge, with the
-// project's name, its branch and, in a worktree, a WORKTREE chip. A strip in
-// the project's colour runs along its top; the colour comes from the name, so a
-// project looks the same in every session.
+// project's name, its branch and, in a worktree, a WORKTREE chip. The
+// monogram and the worktree chip are in the project's colour, which comes from
+// the name, so a project looks the same in every session. The tab's outline
+// and fill are the card's own (`TAB_STYLE`), so it reads as part of the card.
 //
 // The app draws the band in a box of its own and crops whatever is drawn past
 // it, so the tab cannot stand above that box. Instead the card is lowered by
@@ -11,8 +12,8 @@
 // drawing behind it, gets a top edge of its own (`classicTop`).
 //
 // Arrival, for a moment after the project or branch changes: the tab rises out
-// of the card, the strip draws in from its middle, the monogram pops, and a
-// sheen crosses the name once. While Claude works a light runs along the strip.
+// of the card, the monogram pops, and a sheen crosses the name once. While
+// Claude works a light runs along the tab's top edge, in the edge's colour.
 // Every animation is timed from the moment of the change, not from the
 // drawing's own start, so a redraw meanwhile picks it up where it stands.
 
@@ -58,11 +59,29 @@ const INSET = CORNER + 10 + F
 const EDGE_Y = 1.4
 const EDGE_W = 1.2
 /**
- * How bright each card mode draws its top edge (white's opacity), so the tab's outline meets it at the same
- * brightness: Glass's rim where it starts (glass.ts `rim`), Cluster's hairline (cluster.ts `hairline`), and
- * Classic's opaque edge over the page.
+ * How the tab looks on each mode, so it reads as part of the card it stands on:
+ * - `ink`: how bright the mode draws its top edge (the opacity of `line`), so the tab's outline meets it at the
+ *   same brightness: Glass's rim where it starts (glass.ts `rim`), the hairlines of Cluster, Tuner and Board
+ *   (each file's `hairline` or `EDGE`), and Classic's opaque edge over the page.
+ * - `fill`: the tab's fill, top to foot. The foot is the card's colour along its top edge, so the two meet
+ *   without a seam, and the top a little lighter. Where a mode lays a sheen over its ground, the foot is the two
+ *   together: Glass and Cluster's #050505 under 6-7% white, Tuner's warm #0c0b09 under 7%. Board has no sheen,
+ *   and Classic's tab stands on the app's box.
+ * - `line`: the outline's colour, the card's own edge colour, and the colour of the light that runs along the
+ *   tab's top edge while Claude works.
  */
-export const EDGE_INK = { glass: 0.55, cluster: 0.24, classic: 0.53 } as const
+export type TabStyle = { ink: number; fill: readonly [string, string]; line: string }
+export const TAB_STYLE = {
+  glass: { ink: 0.55, fill: ['#1c1c1c', '#141414'], line: '#fff' },
+  cluster: { ink: 0.24, fill: ['#1c1c1c', '#141414'], line: '#fff' },
+  tuner: { ink: 0.28, fill: ['#252421', '#1d1c1a'], line: '#efe6cf' },
+  board: { ink: 0.24, fill: ['#131314', '#0b0b0c'], line: '#fff' },
+  classic: { ink: 0.53, fill: ['#202020', BAND], line: '#fff' },
+} as const satisfies Record<string, TabStyle>
+/** A light on the card under the tab, in card coordinates, that carries up into it: Tuner's backlight round its needle. */
+export type TabLight = { x: number; y: number; r: number; color: string; opacity: number }
+/** A mode's art, with what of it reaches the tab: its light. */
+export type TabArt = { source: string; width: number; light?: TabLight }
 const RUN_MS = 2_400
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -79,21 +98,20 @@ const motionStyle = (m: TabMotion, arriving: boolean, sheenTo: number, runFrom: 
     '<style>' +
     (arriving
       ? `.pb-rise{animation:pbr .32s cubic-bezier(.2,.9,.25,1) ${at(0)} both}@keyframes pbr{from{transform:translateY(${TAB_H}px)}}` +
-        `.pb-strip{transform-box:fill-box;transform-origin:50% 50%;animation:pbs .5s ease-out ${at(250)} both}@keyframes pbs{from{transform:scaleX(0);opacity:0}}` +
         `.pb-pop{transform-box:fill-box;transform-origin:50% 50%;animation:pbp .4s cubic-bezier(.3,1.6,.5,1) ${at(300)} both}@keyframes pbp{from{transform:scale(.3);opacity:0}}` +
         `.pb-sheen{animation:pbh 1.1s ease-out ${at(700)} both}@keyframes pbh{from{transform:translateX(-40px)}to{transform:translateX(${sheenTo}px)}}`
       : '') +
     (m.busy ? `.pb-run{animation:pbt ${RUN_MS}ms linear -${m.now % RUN_MS}ms infinite}@keyframes pbt{from{transform:translateX(${runFrom}px)}to{transform:translateX(${runTo}px)}}` : '') +
-    '@media (prefers-reduced-motion: reduce){.pb-rise,.pb-strip,.pb-pop{animation:none}.pb-sheen,.pb-run{display:none}}</style>'
+    '@media (prefers-reduced-motion: reduce){.pb-rise,.pb-pop{animation:none}.pb-sheen,.pb-run{display:none}}</style>'
   )
 }
 
 /**
  * The tab, drawn with its left edge at `x` and its base on the card's top edge `base`, as an SVG fragment.
- * Fillets join it to the edge, and it rises from behind the card. `body` is the colour of the card it stands
- * on, so the two meet without a seam: the card modes' glass, or the app's box under Classic.
+ * Fillets join it to the edge, and it rises from behind the card. `look` is the mode's style (`TAB_STYLE`),
+ * and `light` a light on the card that carries up into it.
  */
-function tab(p: UsageBarProject, m: TabMotion, x: number, base: number, body: 'glass' | 'band', edgeInk: number): string {
+function tab(p: UsageBarProject, m: TabMotion, x: number, base: number, look: TabStyle, light?: TabLight): string {
   const hue = colorOf(p.name)
   const name = cut(p.name, 28)
   const branch = branchLabel(p)
@@ -113,7 +131,7 @@ function tab(p: UsageBarProject, m: TabMotion, x: number, base: number, body: 'g
   const right = (p.worktree ? wtX + wtW : chipX + chipW) + 11
   const width = right - x
 
-  const [fillTop, fillFoot] = body === 'glass' ? ['#1c1c1c', '#141414'] : ['#202020', BAND]
+  const [fillTop, fillFoot] = look.fill
   // The outline: up from the card's top edge with a fillet, round the top corners, down to the edge with a fillet.
   // The fillets leave and meet the edge on its own line, level with it, so edge and outline are one stroke. The
   // fill runs a little below that line, so it hides the card's edge under the tab.
@@ -126,34 +144,35 @@ function tab(p: UsageBarProject, m: TabMotion, x: number, base: number, body: 'g
 
   const arriving = m.elapsed < ARRIVAL_MS
   const cls = (c: string) => (arriving ? ` class="${c}"` : '')
-  const stripL = x + R
-  const stripR = right - R
-  // The strip is the tab's own top edge in the project's colour: along the top, round both corners and a little
-  // way down each side, where the grey edge takes over. Drawn over the edge, so the two are one line.
-  const cap = `M${x} ${top + R + 4}V${top + R}A${R} ${R} 0 0 1 ${x + R} ${top}H${right - R}A${R} ${R} 0 0 1 ${right} ${top + R}V${top + R + 4}`
+  // The straight run of the tab's top edge, between its corners: where the light runs while Claude works.
+  const runL = x + R
+  const runR = right - R
 
   const defs =
     `<linearGradient id="pbf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${fillTop}"/><stop offset="1" stop-color="${fillFoot}"/></linearGradient>` +
+    // The card's light, at the same place and strength as on the card: the card's coordinates start EDGE_SIDE right of the drawing's and at `base`.
+    (light
+      ? `<radialGradient id="pbb" gradientUnits="userSpaceOnUse" cx="${light.x + EDGE_SIDE}" cy="${base + light.y}" r="${light.r}"><stop offset="0" stop-color="${light.color}" stop-opacity="${light.opacity}"/><stop offset="1" stop-color="${light.color}" stop-opacity="0"/></radialGradient>`
+      : '') +
     // The outline is as bright as the card's own top edge where the two meet, so the edge runs up and round the tab as one line.
-    `<linearGradient id="pbe" gradientUnits="userSpaceOnUse" x1="0" y1="${top}" x2="0" y2="${edge}"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="${edgeInk}"/></linearGradient>` +
-    // In px: a level line has no height, so a region measured from its box would hold no glow.
-    `<filter id="pbg" filterUnits="userSpaceOnUse" x="${x - 10}" y="${top - 10}" width="${width + 20}" height="${R + 26}"><feGaussianBlur stdDeviation="2.4"/></filter>` +
+    `<linearGradient id="pbe" gradientUnits="userSpaceOnUse" x1="0" y1="${top}" x2="0" y2="${edge}"><stop offset="0" stop-color="${look.line}" stop-opacity=".5"/><stop offset="1" stop-color="${look.line}" stop-opacity="${look.ink}"/></linearGradient>` +
+    // the sheen across the name, and the light along the top edge in the edge's own colour
     `<linearGradient id="pbs"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+    `<linearGradient id="pbr"><stop offset="0" stop-color="${look.line}" stop-opacity="0"/><stop offset=".5" stop-color="${look.line}" stop-opacity=".95"/><stop offset="1" stop-color="${look.line}" stop-opacity="0"/></linearGradient>` +
     // The tab rises from behind the card: nothing of it shows below the card's top edge.
     `<clipPath id="pbk"><rect x="${x - F - 3}" y="-99" width="${width + 2 * F + 6}" height="${foot + 99}"/></clipPath>` +
     `<clipPath id="pbn"><text x="${nameX}" y="${mid + 4.4}" font-family="${FONT}" font-size="${NAME_PX}" font-weight="800">${esc(name)}</text></clipPath>` +
-    `<clipPath id="pbl"><rect x="${stripL}" y="${top - 2}" width="${stripR - stripL}" height="4"/></clipPath>`
+    `<clipPath id="pbl"><rect x="${runL}" y="${top - 2}" width="${runR - runL}" height="4"/></clipPath>`
 
   const branchMark = p.repo ? branchIcon(chipX + 6, mid - 6, '#a6a6ab') : `<path d="${FOLDER_ICON}" transform="translate(${chipX + 6} ${mid - 6.5})" fill="none" stroke="#a6a6ab" stroke-width="1.3"/>`
 
   const drawn =
     under +
     `<path d="${outline}V${foot}H${x - F - 2}Z" fill="url(#pbf)"/>` +
+    (light ? `<path d="${outline}V${foot}H${x - F - 2}Z" fill="url(#pbb)"/>` : '') +
     `<path d="${outline}" fill="none" stroke="url(#pbe)" stroke-width="${EDGE_W}"/>` +
-    // the strip in the project's colour, with its glow
-    `<g${cls('pb-strip')}><path d="${cap}" fill="none" stroke="${hue}" stroke-width="3" filter="url(#pbg)" opacity=".9"/>` +
-    `<path d="${cap}" fill="none" stroke="${hue}" stroke-width="2"/></g>` +
-    (m.busy ? `<g clip-path="url(#pbl)"><rect class="pb-run" x="0" y="${top - 1.6}" width="34" height="3.2" fill="url(#pbs)"/></g>` : '') +
+    // while Claude works, a light runs along the top edge
+    (m.busy ? `<g clip-path="url(#pbl)"><rect class="pb-run" x="0" y="${top - 1.6}" width="34" height="3.2" fill="url(#pbr)"/></g>` : '') +
     // the monogram
     `<g${cls('pb-pop')}><rect x="${mgX}" y="${mid - 8}" width="16" height="16" rx="4" fill="${hue}"/>` +
     `<text x="${mgX + 8}" y="${mid + 3}" text-anchor="middle" font-family="${FONT}" font-size="8.5" font-weight="800" fill="#000">${esc(monogram(p.name))}</text></g>` +
@@ -170,7 +189,7 @@ function tab(p: UsageBarProject, m: TabMotion, x: number, base: number, body: 'g
         `<text x="${wtX + 6}" y="${mid + 3.2}" font-family="${FONT}" font-size="9" font-weight="700" letter-spacing=".6" fill="${hue}">WORKTREE</text>`
       : '')
 
-  const style = arriving || m.busy ? motionStyle(m, arriving, nameW + 40, stripL - 34, stripR) : ''
+  const style = arriving || m.busy ? motionStyle(m, arriving, nameW + 40, runL - 34, runR) : ''
   return `${style}<defs>${defs}</defs><g clip-path="url(#pbk)"><g${cls('pb-rise')}>${drawn}</g></g>`
 }
 
@@ -194,9 +213,9 @@ export function lift(source: string, width: number, height: number, clip: boolea
   )
 }
 
-/** The card's art with the tab above its left end: the lowered art and the tab, in one drawing. */
-export const tabbedArt = (art: { source: string; width: number }, height: number, p: UsageBarProject, m: TabMotion, edgeInk: number) =>
-  lift(art.source, art.width, height, true, tab(p, m, EDGE_SIDE + INSET, CARD_TOP, 'glass', edgeInk))
+/** The card's art with the tab above its left end: the lowered art and the tab, in one drawing, the tab in the mode's `style` and with the art's light. */
+export const tabbedArt = (art: TabArt, height: number, p: UsageBarProject, m: TabMotion, style: TabStyle) =>
+  lift(art.source, art.width, height, true, tab(p, m, EDGE_SIDE + INSET, CARD_TOP, style, art.light))
 
 /** Classic's drawings' height: the room above, the edge, and the corners' sweep down the sides. */
 const CLASSIC_H = CARD_TOP + CORNER + 12
@@ -221,7 +240,7 @@ export function classicTop(p: UsageBarProject, m: TabMotion, width: number): { l
   const left =
     `<path d="M-1 -1H${width + 1}V${y}H${l + r}A${r} ${r} 0 0 0 ${l} ${y + r}V${CLASSIC_H + 1}H-1Z" fill="${PAGE}"/>` +
     `<path d="M${width + 1} ${y + 0.9}H${l + r}A${r - 0.9} ${r - 0.9} 0 0 0 ${l + 0.9} ${y + r}V${y + r + 12}" fill="none" stroke="url(#pbrim)" stroke-width="${EDGE_W}"/>` +
-    tab(p, m, EDGE_SIDE + INSET, CARD_TOP, 'band', EDGE_INK.classic)
+    tab(p, m, EDGE_SIDE + INSET, CARD_TOP, TAB_STYLE.classic)
 
   const e = CLASSIC_END - EDGE_SIDE - 0.5
   const right =

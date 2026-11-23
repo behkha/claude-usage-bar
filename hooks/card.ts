@@ -49,3 +49,32 @@ export const edgeRight = (inner: number) => {
 
 /** One rate-limit window as a mode draws it: percent used, the share of the window gone by, the time left as text. */
 export type Gauge = { percent: number; pace: number | null; left: string | null; level: 'ok' | 'ahead' | 'high' }
+
+/**
+ * A mode's left end, as one SVG `width` px wide and `ART_HEIGHT` tall: `body`, in card coordinates, on a `ground`
+ * that fills the card, the two left corners cut, and a hairline of `edge` round them. `head` goes before the
+ * drawing's defs: a mode's `<style>`.
+ */
+export const leftEnd = (width: number, ground: string, body: string, o: { defs?: string; edge: string; head?: string }) =>
+  // `slice` from the top left: where the app gives the drawing a narrower box, it is cropped at the right, never scaled to fit.
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ART_HEIGHT}" viewBox="0 0 ${width} ${ART_HEIGHT}" preserveAspectRatio="xMinYMin slice">${o.head ?? ''}<defs>${o.defs ?? ''}<clipPath id="cut"><path d="${cutLeft(width)}"/></clipPath></defs>` +
+  `<g clip-path="url(#cut)"><rect width="${width}" height="${ART_HEIGHT}" fill="${ground}"/><g transform="translate(${EDGE_SIDE} ${EDGE_TOP})">${body}` +
+  `<path d="${edgeLeft(width)}" fill="none" stroke="${o.edge}" stroke-width="1.2"/></g></g></svg>`
+
+/**
+ * A mode's plate at the card's right end, `inner` px of it on the card: `body`, in the plate's own coordinates, on
+ * a `ground`, the two right corners cut, a hairline of `edge` round them, and a `rule` at `rail`, where the
+ * band's buttons begin.
+ */
+export const rightEnd = (inner: number, rail: number, ground: string, body: string, o: { defs?: string; edge: string; rule: string; head?: string }) => {
+  const width = inner + EDGE_SIDE
+  return {
+    source:
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ART_HEIGHT}" viewBox="0 0 ${width} ${ART_HEIGHT}" preserveAspectRatio="xMaxYMin slice">${o.head ?? ''}<defs>${o.defs ?? ''}<clipPath id="cut"><path d="${cutRight(inner)}"/></clipPath></defs>` +
+      `<g clip-path="url(#cut)"><rect width="${width}" height="${ART_HEIGHT}" fill="${ground}"/><g transform="translate(0 ${EDGE_TOP})">${body}` +
+      `<line x1="${rail + 0.5}" y1="10" x2="${rail + 0.5}" y2="83" stroke="${o.rule}"/>` +
+      `<path d="${edgeRight(inner)}" fill="none" stroke="${o.edge}" stroke-width="1.2"/></g></g></svg>`,
+    width,
+    height: ART_HEIGHT,
+  }
+}
