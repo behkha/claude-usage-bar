@@ -1,0 +1,23 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "space grotesk",
+        "files": [
+          "prototype/build.ts"
+        ],
+        "createdAt": "2026-11-23T14:05:12.086Z",
+        "reason": "Claude: headings of the throwaway mockup page in gitignored prototype/, already approved by the user; not shipped UI"
+      },
+      {
+        "rule": "overused-font",
+        "value": "space grotesk",
+        "createdAt": "2026-11-23T19:54:53.181Z",
+        "reason": "lead session: the design page for owner review reuses the earlier New Band Modes page's heading face so the two read as one family (design-together skill); a git-ignored mockup page, not the mod's UI"
+      }
+    ]
+  }
+}

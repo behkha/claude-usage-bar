@@ -21,9 +21,14 @@ import { clusterArt, clusterCentre, clusterPlate } from '../hooks/cluster'
 import { RAIL, glassArt, glassPlate } from '../hooks/glass'
 import { tunerArt, tunerPlate } from '../hooks/tuner'
 import { boardArt, boardPlate } from '../hooks/board'
-import { ARRIVAL_MS, LIFT, TAB_STYLE, lift, tabbedArt } from '../hooks/tab'
+import { lcdArt, lcdPlate } from '../hooks/lcd'
+import { vuArt, vuPlate } from '../hooks/vu'
+import { cockpitArt, cockpitPlate } from '../hooks/cockpit'
+import { panelArt, panelPlate } from '../hooks/panel'
+import { nixieArt, nixiePlate } from '../hooks/nixie'
+import { ARRIVAL_MS, LIFT, TAB_STYLE, lift, projectRoom, tabbedArt, updateTab } from '../hooks/tab'
 import type { TabArt } from '../hooks/tab'
-import type { UsageBarProject } from '../types'
+import type { UsageBarNotice, UsageBarProject } from '../types'
 
 // ---------- the example session ----------
 
@@ -75,12 +80,33 @@ const MODES = {
     const input = { ...n, width: 2400, narrow: width, wide: width >= 768, flip: null }
     return { art: boardArt(input), plate: boardPlate(input), centre: null }
   },
+  vu: (n: Numbers, width: number): Card => {
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768 }
+    return { art: vuArt(input), plate: vuPlate(input), centre: null }
+  },
+  nixie: (n: Numbers, width: number): Card => {
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768 }
+    return { art: nixieArt(input), plate: nixiePlate(input), centre: null }
+  },
+  cockpit: (n: Numbers, width: number): Card => {
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768 }
+    return { art: cockpitArt(input), plate: cockpitPlate(input), centre: null }
+  },
+  panel: (n: Numbers, width: number): Card => {
+    // The pictures' rail shows the child-sessions button.
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768, family: true }
+    return { art: panelArt(input), plate: panelPlate(input), centre: null }
+  },
+  lcd: (n: Numbers, width: number): Card => {
+    const input = { ...n, width: 2400, narrow: width, wide: width >= 768 }
+    return { art: lcdArt(input), plate: lcdPlate(input), centre: null }
+  },
 } satisfies Record<string, (n: Numbers, width: number) => Card>
 type Mode = keyof typeof MODES
 
 // ---------- the pictures ----------
 
-type Placed = { mode: Mode; session: Session; width: number; left: number; top: number; project?: UsageBarProject }
+type Placed = { mode: Mode; session: Session; width: number; left: number; top: number; project?: UsageBarProject; notice?: UsageBarNotice }
 type Shot = {
   /** The file under docs/images. */
   file: string
@@ -92,6 +118,8 @@ type Shot = {
   fade?: 'left' | 'right'
   /** The ground round the cards, where it is not the black of the other pictures: the app's page, which the tab's room is painted in. */
   ground?: string
+  /** Taken under the app's light theme: the drawings follow it through `prefers-color-scheme`. Dark otherwise. */
+  light?: boolean
   cards: Placed[]
 }
 
@@ -125,6 +153,21 @@ const tabbed = (mode: Mode, file: string): Shot => ({
   cards: [{ ...whole(mode, 'normal'), project: PROJECTS[0] }],
 })
 
+/** A mode's card in a narrow pane, with the project tab and the update tab, as the band shows it. */
+const NARROW_W = 520
+const narrowTabbed = (mode: Mode, file: string, width = NARROW_W): Shot => ({
+  file,
+  scale: 2,
+  ground: '#0a0a0a',
+  width: width + 2 * MARGIN_X,
+  height: CARD_HEIGHT + LIFT + 2 * MARGIN_Y,
+  cards: [{ mode, session: 'normal', width, left: MARGIN_X, top: MARGIN_Y, project: PROJECTS[0], notice: NOTICE }],
+})
+
+/** The update notice: a newer version is out. */
+const NOTICE: UsageBarNotice = { version: '0.2.0', phase: 'available', since: 0 }
+const CLOSE_W = 430
+
 const SHOTS: Shot[] = [
   { file: 'cluster.png', width: WHOLE + 2 * MARGIN_X, height: CARD_HEIGHT + 2 * MARGIN_Y, scale: 2, cards: [whole('cluster', 'normal')] },
   // Close-ups: the same card three times as large, cut where the picture ends.
@@ -135,6 +178,27 @@ const SHOTS: Shot[] = [
   { file: 'tuner-sessions.png', scale: 2, ...stack('tuner', ['eco', 'normal', 'sport'], 780, 18) },
   tabbed('board', 'board.png'),
   { file: 'board-sessions.png', scale: 2, ...stack('board', ['eco', 'normal', 'sport'], 780, 18) },
+  tabbed('vu', 'vu.png'),
+  { file: 'vu-sessions.png', scale: 2, ...stack('vu', ['eco', 'normal', 'sport'], 780, 18) },
+  narrowTabbed('vu', 'vu-narrow.png'),
+  // Narrower still: the 5-hour meter has moved onto the plate.
+  narrowTabbed('vu', 'vu-narrowest.png', 440),
+  tabbed('nixie', 'nixie.png'),
+  { file: 'nixie-sessions.png', scale: 2, ...stack('nixie', ['eco', 'normal', 'sport'], 780, 18) },
+  narrowTabbed('nixie', 'nixie-narrow.png'),
+  tabbed('cockpit', 'cockpit.png'),
+  { file: 'cockpit-sessions.png', scale: 2, ...stack('cockpit', ['eco', 'normal', 'sport'], 780, 18) },
+  narrowTabbed('cockpit', 'cockpit-narrow.png'),
+  // Narrower still: the reset times gone, the tapes shorter.
+  narrowTabbed('cockpit', 'cockpit-narrowest.png', 420),
+  tabbed('lcd', 'lcd.png'),
+  { file: 'lcd-sessions.png', scale: 2, ...stack('lcd', ['eco', 'normal', 'sport'], 780, 18) },
+  narrowTabbed('lcd', 'lcd-narrow.png'),
+  tabbed('panel', 'panel.png'),
+  // Under the app's light theme: the room above the card takes the page's light colour.
+  { ...tabbed('panel', 'panel-light.png'), ground: '#faf9f5', light: true },
+  { file: 'panel-sessions.png', scale: 2, ...stack('panel', ['eco', 'normal', 'sport'], 780, 18) },
+  narrowTabbed('panel', 'panel-narrow.png'),
   {
     file: 'tab.png',
     scale: 2,
@@ -142,6 +206,16 @@ const SHOTS: Shot[] = [
     width: TABBED_W + 2 * MARGIN_X,
     height: PROJECTS.length * (CARD_HEIGHT + LIFT) + (PROJECTS.length - 1) * TABBED_GAP + 2 * MARGIN_Y,
     cards: PROJECTS.map((project, n) => ({ mode: n === 1 ? 'cluster' : 'glass', session: 'normal', width: TABBED_W, left: MARGIN_X, top: MARGIN_Y + n * (CARD_HEIGHT + LIFT + TABBED_GAP), project })),
+  },
+  // Close-up: the Glass card's right end with the update tab, three times as large.
+  {
+    file: 'update.png',
+    scale: 3,
+    fade: 'left',
+    ground: '#0a0a0a',
+    width: CLOSE_W,
+    height: CARD_HEIGHT + LIFT + 2 * MARGIN_Y,
+    cards: [{ ...whole('glass', 'normal'), left: CLOSE_W - MARGIN_X - WHOLE, project: PROJECTS[0], notice: NOTICE }],
   },
 ]
 
@@ -152,28 +226,36 @@ const uri = (svg: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}
 // The rail's buttons are the app's own, not drawings of the mod: child sessions, the mode switch, Claude FM.
 // The mode switch shows the mode's glyph: a disc with the half filled that each mode fills, or Board's grid.
 const HALF: Partial<Record<Mode, number>> = { glass: 90, cluster: 0, tuner: 180 }
+/** The modes whose glyph is drawn as the app's text, not as a shape. */
+const TEXT_GLYPH: Partial<Record<Mode, string>> = { vu: '◠', nixie: '◍', cockpit: '△', lcd: '▤', panel: '◎' }
 const modeGlyph = (mode: Mode) =>
-  mode === 'board'
+  TEXT_GLYPH[mode]
+    ? `<text x="16" y="51" font-size="13" text-anchor="middle">${TEXT_GLYPH[mode]}</text>`
+    : mode === 'board'
     ? '<g fill="none" stroke="#9a9a9a" stroke-width="1.1"><rect x="10.8" y="41.3" width="10.4" height="10.4"/><path d="M14.3 41.3v10.4M17.7 41.3v10.4M10.8 44.8h10.4M10.8 48.2h10.4"/></g>'
     : `<circle cx="16" cy="46.5" r="5.2" fill="none" stroke="#9a9a9a" stroke-width="1.1"/><path d="M10.8 46.5a5.2 5.2 0 0 0 10.4 0Z" transform="rotate(${HALF[mode] ?? 0} 16 46.5)"/>`
+// Drawn round 27, 46.5 and 66, then raised to where the app stands them: their centres measured at 20.5, 40 and 60.
+const RAIL_RISE = 6.5
 const railButtons = (mode: Mode) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${RAIL}" height="${CARD_HEIGHT}" viewBox="0 0 ${RAIL} ${CARD_HEIGHT}" font-family="-apple-system,system-ui,sans-serif" fill="#9a9a9a">` +
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${RAIL}" height="${CARD_HEIGHT}" viewBox="0 0 ${RAIL} ${CARD_HEIGHT}" font-family="-apple-system,system-ui,sans-serif" fill="#9a9a9a"><g transform="translate(0 -${RAIL_RISE})">` +
   '<text x="16" y="31" font-size="12" text-anchor="middle">3▸</text>' +
   modeGlyph(mode) +
-  '<text x="16" y="71" font-size="13" text-anchor="middle">♪</text></svg>'
+  '<text x="16" y="71" font-size="13" text-anchor="middle">♪</text></g></svg>'
 
 const cardHtml = (p: Placed) => {
   const drawn = MODES[p.mode](SESSIONS[p.session], p.width)
-  // With a project, every drawing is lowered by the tab's height and the tab stands above, as the band lays it.
-  const up = p.project ? LIFT : 0
-  const card: Card = p.project
+  // With a project or an update notice, every drawing is lowered by the tab's height and the tabs stand above, as the band lays them.
+  const up = p.project || p.notice ? LIFT : 0
+  const card: Card = up
     ? {
-        art: { source: tabbedArt(drawn.art, ART_HEIGHT, p.project, { elapsed: ARRIVAL_MS, now: 0, busy: false }, TAB_STYLE[p.mode]), width: drawn.art.width },
+        art: { source: tabbedArt(drawn.art, ART_HEIGHT, p.project ?? null, { elapsed: ARRIVAL_MS, now: 0, busy: false }, TAB_STYLE[p.mode], projectRoom(p.notice ?? null, p.width)), width: drawn.art.width },
         plate: { ...drawn.plate, source: lift(drawn.plate.source, drawn.plate.width, drawn.plate.height, true), height: drawn.plate.height + up },
         centre: drawn.centre ? { ...drawn.centre, source: lift(drawn.centre.source, drawn.centre.width, drawn.centre.height, false), height: drawn.centre.height + up } : null,
       }
     : drawn
   const img = (d: { source: string; width: number }, height: number, style: string) => `<img src="${uri(d.source)}" width="${d.width}" height="${height}" style="${style}">`
+  // The update tab, laid from the plate's outer edge with its base on the card's top edge; its label drawn in, where the band lays a Button.
+  const update = p.notice ? updateTab(p.notice, TAB_STYLE[p.mode], ARRIVAL_MS, true) : null
   return (
     // The card crops its art to a plain rectangle; the art cuts the corners itself.
     `<div style="position:absolute;left:${p.left}px;top:${p.top}px;width:${p.width}px;height:${CARD_HEIGHT + up}px;overflow:hidden">` +
@@ -181,13 +263,14 @@ const cardHtml = (p: Placed) => {
     (card.centre ? `<div style="position:absolute;top:${-EDGE_TOP}px;left:0;right:${RAIL}px;display:flex;justify-content:center">${img(card.centre, card.centre.height, '')}</div>` : '') +
     img(card.plate, card.plate.height, `position:absolute;top:${-EDGE_TOP}px;right:${-EDGE_SIDE}px`) +
     `<img src="${uri(railButtons(p.mode))}" width="${RAIL}" height="${CARD_HEIGHT}" style="position:absolute;top:${up}px;right:0">` +
+    (update ? img(update, update.height, `position:absolute;top:0;right:${update.right - EDGE_SIDE}px`) : '') +
     '</div>'
   )
 }
 
 const FADE = 110
 const page = (s: Shot) => {
-  const fade = s.fade ? `<div style="position:absolute;top:0;bottom:0;${s.fade}:0;width:${FADE}px;background:linear-gradient(to ${s.fade},transparent,#000 78%)"></div>` : ''
+  const fade = s.fade ? `<div style="position:absolute;top:0;bottom:0;${s.fade}:0;width:${FADE}px;background:linear-gradient(to ${s.fade},transparent,${s.ground ?? '#000'} 78%)"></div>` : ''
   return (
     `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:${s.ground ?? '#000'}}img{display:block}</style>` +
     `<div style="position:relative;width:${s.width}px;height:${s.height}px;overflow:hidden">${s.cards.map(cardHtml).join('')}${fade}</div>`
@@ -210,6 +293,8 @@ for (const shot of SHOTS) {
     '--disable-gpu',
     '--hide-scrollbars',
     `--force-device-scale-factor=${shot.scale}`,
+    // The scheme the drawings see, so a picture does not follow this machine's setting.
+    `--blink-settings=preferredColorScheme=${shot.light ? 1 : 0}`,
     `--window-size=${shot.width},${shot.height}`,
     `--screenshot=${join(out, shot.file)}`,
     `file://${html}`,

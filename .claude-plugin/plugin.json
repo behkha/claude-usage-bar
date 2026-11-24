@@ -1,9 +1,10 @@
 {
   "name": "usage-bar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A band above the prompt: context, session tokens and cost, the 5-hour, weekly and per-model limits, child sessions and Claude FM; keeps any other band below it",
   "types": "./types/index.d.ts",
   "license": "MIT",
+  "repository": "https://github.com/behkha/claude-usage-bar",
   "author": {
     "name": "behkha"
   }

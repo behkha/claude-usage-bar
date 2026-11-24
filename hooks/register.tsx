@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
-import type { UsageBarChild, UsageBarFamily, UsageBarFlaps, UsageBarLedger, UsageBarModelLimits, UsageBarMood, UsageBarProject, UsageBarReading, UsageBarWindow } from '../types'
+import type { UsageBarChild, UsageBarFamily, UsageBarFlaps, UsageBarLedger, UsageBarModelLimits, UsageBarMood, UsageBarNotice, UsageBarProject, UsageBarReading, UsageBarWindow } from '../types'
 import { BLACK_LOOK, BLACK_PROBLEM } from './black'
 import { RAIL, glassAlt, glassArt, glassPlate, limitsAlt } from './glass'
 import type { GlassInput } from './glass'
@@ -11,12 +11,21 @@ import { tunerAlt, tunerArt, tunerLimitsAlt, tunerPlate } from './tuner'
 import type { TunerInput } from './tuner'
 import { FLIP_MS, boardAlt, boardArt, boardFaces, boardLimitsAlt, boardPlate } from './board'
 import type { BoardInput } from './board'
-import { ART_HEIGHT, SPACER, ZONE_HEIGHT } from './card'
+import { lcdAlt, lcdArt, lcdLimitsAlt, lcdPlate } from './lcd'
+import type { LcdInput } from './lcd'
+import { pickerArt, pickerPlate } from './picker'
+import type { InstrumentInput } from './instruments'
+import { vuAlt, vuArt, vuLimitsAlt, vuPlate } from './vu'
+import { cockpitAlt, cockpitArt, cockpitLimitsAlt, cockpitPlate } from './cockpit'
+import { panelAlt, panelArt, panelLimitsAlt, panelPlate } from './panel'
+import { nixieAlt, nixieArt, nixieLimitsAlt, nixiePlate } from './nixie'
+import { ART_HEIGHT, EDGE_TOP, SPACER, ZONE_HEIGHT } from './card'
 import type { Gauge } from './card'
 import { branchLabel, detectProject, hexOf, projectAlt, sameProject } from './project'
-import { ARRIVAL_MS, CLASSIC_END, LIFT, TAB_STYLE, classicTop, lift, tabbedArt } from './tab'
+import { ARRIVAL_MS, CLASSIC_END, LIFT, TAB_STYLE, classicTop, lift, projectRoom, tabbedArt, updateTab, updateWords } from './tab'
+import { checkUpdate, press, runCommand, syncNotice } from './update'
 import { textWidth } from './measure'
-import type { TabArt, TabMotion } from './tab'
+import type { TabArt, TabMotion, TabStyle } from './tab'
 
 const windows = atom({ plugin: 'usage-bar', key: 'windows' } as const, [])
 const modelLimits = atom({ plugin: 'usage-bar', key: 'modelLimits' } as const, null)
@@ -46,6 +55,8 @@ const syncProject = async ($: EngineInterface) => {
   await update($, projectSince, () => Date.now())
   $.clock.after(ARRIVAL_MS + 50, () => void update($, now, () => Date.now()))
 }
+// The update notice (update.ts keeps it): the scan reads state through an atom of this file.
+const notice = atom({ plugin: 'usage-bar', key: 'notice' } as const, null)
 const projectOf = async ($: EngineInterface) => (await read($, project)) as UsageBarProject | null
 const motionOf = async ($: EngineInterface, busy: boolean): Promise<TabMotion> => {
   const at = Date.now()
@@ -58,27 +69,46 @@ const motionOf = async ($: EngineInterface, busy: boolean): Promise<TabMotion> =
 const gap = (width: number, height: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="#000" fill-opacity="0"/></svg>`
 
 // ---------- the modes ----------
-// The band draws the Glass card, the Cluster card, the Tuner card, the Board
-// card or the classic meters. The control steps through them in that order;
-// the choice is shared by every session through the store.
+// The band draws one of the card modes or the classic meters. The mode button
+// opens a picker of them, in this order; the choice is shared by every session
+// through the store.
 const GLASS = 'glass'
 const CLUSTER = 'cluster'
 const TUNER = 'tuner'
 const BOARD = 'board'
 const CLASSIC = 'classic'
-const SCENES = [GLASS, CLUSTER, TUNER, BOARD, CLASSIC] as const
+const VU = 'vu'
+const NIXIE = 'nixie'
+const COCKPIT = 'cockpit'
+const LCD = 'lcd'
+const PANEL = 'panel'
+const SCENES = [GLASS, CLUSTER, TUNER, BOARD, CLASSIC, VU, NIXIE, COCKPIT, LCD, PANEL] as const
 type Scene = (typeof SCENES)[number]
-/** The control's face in each mode, a glyph of its own: ◐ Glass, ◒ Cluster, ◓ Tuner, ▦ Board, ◑ Classic. */
-const SCENE_GLYPH: Record<Scene, string> = { glass: '◐', cluster: '◒', tuner: '◓', board: '▦', classic: '◑' }
+/** The control's face in each mode, a glyph of its own, and the mode's name. */
+const SCENE_GLYPH: Record<Scene, string> = { glass: '◐', cluster: '◒', tuner: '◓', board: '▦', classic: '◑', vu: '◠', nixie: '◍', cockpit: '△', lcd: '▤', panel: '◎' }
+const SCENE_NAME: Record<Scene, string> = { glass: 'Glass', cluster: 'Cluster', tuner: 'Tuner', board: 'Board', classic: 'Classic', vu: 'VU', nixie: 'Nixie', cockpit: 'Cockpit', lcd: 'LCD', panel: 'Panel' }
 const SCENE_STORE = 'scene'
 const isScene = (v: unknown): v is Scene => SCENES.some(s => s === v)
 /** The mode in force: anything else, such as a scene an earlier version stored, reads as Glass. */
 const modeOf = (v: unknown): Scene => (isScene(v) ? v : GLASS)
 
-const switchScene = async ($: EngineInterface) => {
-  const to = SCENES[(SCENES.indexOf(modeOf(await read($, scene))) + 1) % SCENES.length] ?? GLASS
+const chooseScene = async ($: EngineInterface, to: Scene) => {
   await update($, scene, () => to)
+  await update($, picking, () => 0)
   await $.store.set(SCENE_STORE, to).catch(() => undefined)
+}
+
+// The picker: the mode button turns the card into the modes' names, and pressing one switches to it. It closes
+// on a choice, on the mode button again, or after a while untouched; Escape never reaches a band. Kept to the
+// session where it was opened.
+const picking = atom({ plugin: 'usage-bar', key: 'picking' } as const, 0)
+const PICK_MS = 10_000
+const isPicking = (since: number, at: number) => since > 0 && at - since < PICK_MS
+const togglePicker = async ($: EngineInterface) => {
+  const at = Date.now()
+  const open = !isPicking(await read($, picking), at)
+  await update($, picking, () => (open ? at : 0))
+  if (open) $.clock.after(PICK_MS + 50, () => void update($, now, () => Date.now()))
 }
 
 // What another session chose, picked up here within a poll.
@@ -156,6 +186,26 @@ const boardFor = (input: BoardInput): Strip => {
   // A board that is turning is drawn anew on every redraw, so it is not kept: it would only push out the still ones.
   return input.flip ? draw() : stripFor(`${BOARD}${JSON.stringify(input)}`, draw)
 }
+/** An instrument mode's drawings, kept like the others': `name` keeps one mode's from another's. */
+const instrumentFor = (name: string, input: InstrumentInput, d: { art: (i: InstrumentInput) => TabArt; alt: (i: InstrumentInput) => string; plate: (i: InstrumentInput) => Strip['plate']; limits: (i: InstrumentInput) => string }): Strip =>
+  stripFor(`${name}${JSON.stringify(input)}`, () => ({ art: d.art(input), alt: d.alt(input), plate: d.plate(input), limits: d.limits(input), centre: null }))
+const instrumentInput = (n: CardNumbers): InstrumentInput => ({
+  width: n.shape.cols * 2,
+  narrow: n.shape.narrow,
+  wide: n.shape.wide,
+  five: n.five,
+  seven: n.seven,
+  model: n.model,
+  context: n.context,
+  written: n.written,
+  cache: n.cache,
+  usd: n.usd,
+  turns: n.turns,
+  minutes: n.minutes,
+  family: n.family,
+})
+const lcdFor = (input: LcdInput): Strip =>
+  stripFor(`${LCD}${JSON.stringify(input)}`, () => ({ art: lcdArt(input), alt: lcdAlt(input), plate: lcdPlate(input), limits: lcdLimitsAlt(input), centre: null }))
 
 /** What a card mode draws from: the card's shape, the limits, and the session's numbers. */
 type CardNumbers = {
@@ -172,6 +222,8 @@ type CardNumbers = {
   tools: number
   minutes: number
   busy: boolean
+  /** The rail shows the child-sessions button above the mode button. */
+  family: boolean
   /** The Board's flaps that are turning over: what they showed before, and the ms since the change. */
   flip: BoardInput['flip']
 }
@@ -263,6 +315,12 @@ const CARDS: Partial<Record<Scene, (n: CardNumbers) => Strip>> = {
       minutes: n.minutes,
     }),
   board: n => boardFor(boardInput(n)),
+  vu: n => instrumentFor(VU, instrumentInput(n), { art: vuArt, alt: vuAlt, plate: vuPlate, limits: vuLimitsAlt }),
+  nixie: n => instrumentFor(NIXIE, instrumentInput(n), { art: nixieArt, alt: nixieAlt, plate: nixiePlate, limits: nixieLimitsAlt }),
+  panel: n => instrumentFor(PANEL, instrumentInput(n), { art: panelArt, alt: panelAlt, plate: panelPlate, limits: panelLimitsAlt }),
+  cockpit: n => instrumentFor(COCKPIT, instrumentInput(n), { art: cockpitArt, alt: cockpitAlt, plate: cockpitPlate, limits: cockpitLimitsAlt }),
+  lcd: n =>
+    lcdFor({ width: n.shape.cols * 2, narrow: n.shape.narrow, wide: n.shape.wide, five: n.five, seven: n.seven, model: n.model, context: n.context, cache: n.cache, usd: n.usd, turns: n.turns, minutes: n.minutes }),
 }
 
 const HOUR = 3_600_000
@@ -1525,6 +1583,19 @@ const react = async ($: EngineInterface, reaction: Behaviour, ms = REACTION_MS) 
   $.clock.after(ms + 50, () => void update($, now, () => Date.now()))
 }
 
+/**
+ * The room a plain Button keeps right of its text, measured in the desktop app: its label ended 20 px inside the
+ * update tab's edge where 11 were planned, and so stood 9 px nearer the lamp.
+ */
+const BUTTON_PAD = 9
+/** A blank the width of an en, about 6 px at the band's 12 px: the update Button's text on a light tab, which draws its own label. */
+const BLANK = '\u2002'
+const BLANK_PX = 6
+/** Half the height kept for the update tab's label: the row ends on the card's top edge, never over the card. */
+const LABEL_HALF = 13
+/** The slash command that does what the update tab's press does. */
+const UPDATE_COMMAND = 'usage-bar-update'
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // The black look. An engine without themes throws as the call is reached for; the band carries on.
@@ -1537,6 +1608,12 @@ export const register: Register = on => {
     await loadLedger($).catch(() => undefined)
     // Not awaited: the band draws at once, and the tab arrives when the project is known.
     void syncProject($).catch(() => undefined)
+    // The update notice: what is known now (which also drops an Updating a reload cut short), then the daily check.
+    await $.command.register({ name: UPDATE_COMMAND, description: 'Update usage-bar to its newest version' }).catch(() => undefined)
+    void syncNotice($)
+      .then(() => checkUpdate($))
+      .then(() => syncNotice($))
+      .catch(() => undefined)
     await refresh($)
     if ((await read($, readings)).length === 0) await takeReading($).catch(() => undefined)
     void syncModelLimits($, 0)
@@ -1545,6 +1622,9 @@ export const register: Register = on => {
       void refresh($)
       void syncProject($).catch(() => undefined)
       void syncModelLimits($, MODEL_IDLE_MS)
+      void checkUpdate($)
+        .then(() => syncNotice($))
+        .catch(() => undefined)
     })
     // Children and their live states, for a session that started others.
     void pollFamily($)
@@ -1554,10 +1634,14 @@ export const register: Register = on => {
       void pollFamily($)
       void pollFm($)
       void pollScene($)
+      // What another session found or installed.
+      void syncNotice($).catch(() => undefined)
     })
 
     return next(e)
   })
+
+  on('command.run', { command: UPDATE_COMMAND }, async $ => ({ text: await runCommand($) })).catch(() => ({ text: 'usage-bar: the update could not run.' }))
 
   on('turn.start', async ($, e, next) => {
     const at = Date.now()
@@ -1647,6 +1731,8 @@ export const register: Register = on => {
     const toggle = () => void update($, familyOpen, v => !v)
     const fm = await read($, fmOn)
     const eq = fmEqualizer()
+    const note = (await read($, notice)) as UsageBarNotice | null
+    const takeUpdate = () => void press($).catch(() => undefined)
     // Whatever another plugin beneath draws here stays under ours.
     const below = await next(e)
     const clock = Date.now()
@@ -1696,11 +1782,11 @@ export const register: Register = on => {
 
       const finished = fam ? finishedOf(fam.children) : 0
       const current = modeOf(await read($, scene))
-      // The two controls, the same in every mode. The mode switch shows the mode: ◐ on the Glass card, ◒ on the
-      // Cluster card, ◓ on the Tuner card, ▦ on the Board card, ◑ on the classic meters. Claude FM is a note at rest; while it plays, a clay stop and a moving equalizer.
+      // The two controls, the same in every mode. The mode button shows the mode's glyph and opens the picker.
+      // Claude FM is a note at rest; while it plays, a clay stop and a moving equalizer.
       // No `label` on these: the desktop app draws a label in place of the children, as words across the plate.
       const sceneButton = (
-        <Button key="scene" plain onPress={() => void switchScene($)}>
+        <Button key="scene" plain onPress={() => void togglePicker($)}>
           <Text dimColor>{SCENE_GLYPH[current]}</Text>
         </Button>
       )
@@ -1710,8 +1796,54 @@ export const register: Register = on => {
         </Button>
       )
       const fmPlaying = fm ? <Svg source={eq.source} alt={eq.alt} width={eq.width} height={eq.height} isInteractive /> : null
+      // The update tab at the card's top-right, laid from the band's right end as the plate is, its base on the
+      // card's top edge. A Button holds only text, so the tab is a drawing and its label a Button laid over it.
+      const updateLayers = (mode: Scene) => {
+        if (!note) return [null, null]
+        // On a light tab (Panel's) the label must be dark, but the app draws a Button's text in its own colour
+        // whatever its Text asks (a raw colour and `inverseText` both came out white, measured in the desktop app).
+        // So there the drawing prints the label, and the Button over it holds blank spaces of about its width: the
+        // press stays on the label, and the tab's drawing names it for a screen reader.
+        const tabLook: TabStyle = TAB_STYLE[mode]
+        const light = tabLook.print === 'dark'
+        const t = updateTab(note, tabLook, clock, light)
+        const words = updateWords(note)
+        return [
+          <Box position="absolute" top={-BLEED_Y} right={-BLEED_X} flexDirection="column">
+            <Svg source={gap(1, EDGE_TOP)} alt="Band" width={1} height={EDGE_TOP} />
+            <Box flexDirection="row">
+              <Svg source={t.source} alt={t.alt} width={t.width} height={t.height} isInteractive={t.animated} />
+              <Svg source={gap(t.right, 1)} alt="Band" width={t.right} height={1} />
+            </Box>
+          </Box>,
+          // The row is centred on the label's middle and kept inside the tab's room, so nothing of it lies over the
+          // card's controls; its height comes from a spacer one px wide, so it takes no presses beside the label.
+          <Box position="absolute" top={-BLEED_Y} right={-BLEED_X} flexDirection="column">
+            <Svg source={gap(1, EDGE_TOP + t.label.mid - LABEL_HALF)} alt="Band" width={1} height={EDGE_TOP + t.label.mid - LABEL_HALF} />
+            <Box flexDirection="row" alignItems="center">
+              <Svg source={gap(1, LABEL_HALF * 2)} alt="Band" width={1} height={LABEL_HALF * 2} />
+              <Button key="usage-bar-update" plain onPress={takeUpdate}>
+                {light ? (
+                  <Text>{BLANK.repeat(Math.max(1, Math.round(t.label.width / BLANK_PX)))}</Text>
+                ) : (
+                  <Text bold dimColor={note.phase === 'updating'}>
+                    {words.word}
+                  </Text>
+                )}
+                {light ? null : <Text dimColor>{` ${words.version}`}</Text>}
+              </Button>
+              {/* Less the Button's own padding, so its text, not its padding, ends where the tab plans the label to. */}
+              <Svg source={gap(Math.max(1, t.label.right - BUTTON_PAD), 1)} alt="Band" width={Math.max(1, t.label.right - BUTTON_PAD)} height={1} />
+            </Box>
+          </Box>,
+        ]
+      }
 
-      const card = CARDS[current]
+      // While the picker is open, every mode draws the picker's card, Classic too.
+      const pickOpen = isPicking(await read($, picking), clock)
+      const card = pickOpen ? (n: CardNumbers): Strip => ({ art: pickerArt(n.shape.cols * 2), alt: 'Modes', plate: pickerPlate(), limits: 'Modes', centre: null }) : CARDS[current]
+      // The scene whose colours the card wears: the picker wears Board's.
+      const look: Scene = pickOpen ? BOARD : current
       if (card) {
         const gauge = (kind: string): Gauge | null => {
           const r = rows.find(row => row.kind === kind)
@@ -1737,20 +1869,23 @@ export const register: Register = on => {
           tools: book.tools,
           minutes: book.startedAt > 0 ? Math.max(0, Math.floor((at - book.startedAt) / 60_000)) : 0,
           busy: e.props.isWorking,
+          family: !!fam && fam.needs + fam.working + fam.idle > 0,
           flip: null,
         }
-        if (current === BOARD) numbers.flip = await flipOf($, numbers)
+        if (look === BOARD && !pickOpen) numbers.flip = await flipOf($, numbers)
         else await forgetBoard($)
         const strip = card(numbers)
 
         const others = fam ? fam.needs + fam.working + fam.idle : 0
-        // With a project, every drawing of the card is lowered by the tab's height and the tab stands in the room above.
+        // With a project or an update notice, every drawing of the card is lowered by the tab's height and the tabs stand in the room above.
         const proj = await projectOf($)
-        const up = proj ? LIFT : 0
-        const art = proj ? tabbedArt(strip.art, ART_HEIGHT, proj, await motionOf($, e.props.isWorking), TAB_STYLE[current]) : strip.art.source
-        const plate = proj ? lift(strip.plate.source, strip.plate.width, strip.plate.height, true) : strip.plate.source
-        const centre = strip.centre && proj ? lift(strip.centre.source, strip.centre.width, strip.centre.height, false) : strip.centre?.source
-        const zone = proj ? gap(16, ZONE_HEIGHT + up) : SPACER
+        const up = proj || note ? LIFT : 0
+        // At the narrowest the pane could be, the project tab gives way to the update tab.
+        const art = up ? tabbedArt(strip.art, ART_HEIGHT, proj, await motionOf($, e.props.isWorking), TAB_STYLE[look], projectRoom(note, shape.narrow)) : strip.art.source
+        const plate = up ? lift(strip.plate.source, strip.plate.width, strip.plate.height, true) : strip.plate.source
+        const centre = strip.centre && up ? lift(strip.centre.source, strip.centre.width, strip.centre.height, false) : strip.centre?.source
+        const zone = up ? gap(16, ZONE_HEIGHT + up) : SPACER
+        const [updateDrawing, updateButton] = updateLayers(look)
 
         return (
           <Box flexDirection="column">
@@ -1768,6 +1903,22 @@ export const register: Register = on => {
                 </Box>
               </Box>
               {/* A mode's centred drawing, over the art and left of the rail. In a box that may not shrink, as the art is. */}
+              {/* The picker: the modes' names, centred left of the rail and wrapping in a narrow pane. */}
+              {pickOpen ? (
+                <Box position="absolute" top={0} bottom={0} left={0} right={RAIL_CELLS} flexDirection="column" alignItems="center" justifyContent="center">
+                  {up ? <Svg source={gap(1, up)} alt="Band" width={1} height={up} /> : null}
+                  <Box flexDirection="row" flexWrap="wrap" justifyContent="center">
+                    {/* Each name keeps its own width: in a row too narrow for all ten, the next one wraps instead of being squeezed. */}
+                    {SCENES.map(s => (
+                      <Box key={`mode-box-${s}`} flexShrink={0}>
+                        <Button key={`mode-${s}`} plain onPress={() => void chooseScene($, s)}>
+                          <Text bold={s === current} dimColor={s !== current}>{`${SCENE_GLYPH[s]} ${SCENE_NAME[s]}`}</Text>
+                        </Button>
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              ) : null}
               {strip.centre ? (
                 <Box position="absolute" top={-BLEED_Y} left={0} right={RAIL_CELLS} flexDirection="row" justifyContent="center">
                   <Box flexShrink={0}>
@@ -1779,6 +1930,7 @@ export const register: Register = on => {
               <Box position="absolute" top={-BLEED_Y} right={-BLEED_X}>
                 <Svg source={plate} alt={strip.limits} width={strip.plate.width} height={strip.plate.height + up} isInteractive={numbers.flip !== null} />
               </Box>
+              {updateDrawing}
               {/* What gives the zone its height. */}
               <Svg source={zone} alt="Band" width={16} height={ZONE_HEIGHT + up} />
               {/* The controls, one above the other over the plate's rail and centred in its height. The rail is the
@@ -1798,6 +1950,7 @@ export const register: Register = on => {
                   {fmPlaying}
                 </Box>
               </Box>
+              {updateButton}
             </Box>
             {open && fam ? (
               <Box flexDirection="column">
@@ -1828,24 +1981,28 @@ export const register: Register = on => {
       const proj = await projectOf($)
       // Classic has no drawing behind it, so its top edge is drawn here: the tab rising from it, as in the card modes.
       const motion = await motionOf($, e.props.isWorking)
-      const topWidth = stripShape(e.props.bodyColumns ?? 80).cols * 2
-      const top = proj ? classicTop(proj, motion, topWidth) : null
+      const topShape = stripShape(e.props.bodyColumns ?? 80)
+      const topWidth = topShape.cols * 2
+      const top = proj || note ? classicTop(proj, motion, topWidth, projectRoom(note, topShape.narrow)) : null
+      const [updateDrawing, updateButton] = updateLayers(CLASSIC)
 
       return (
         <Box flexDirection="column">
-          {proj && top ? (
+          {top ? (
             <Box position="relative">
               <Box position="absolute" top={-BLEED_Y} left={-BLEED_X} right={SCENE_STOP} overflow="hidden">
                 <Box flexDirection="row" flexWrap="nowrap">
                   <Box flexShrink={0}>
-                    <Svg source={top.left} alt={projectAlt(proj)} width={topWidth} height={top.height} isInteractive={motion.busy || motion.elapsed < ARRIVAL_MS} />
+                    <Svg source={top.left} alt={proj ? projectAlt(proj) : 'Band'} width={topWidth} height={top.height} isInteractive={!!proj && (motion.busy || motion.elapsed < ARRIVAL_MS)} />
                   </Box>
                 </Box>
               </Box>
               <Box position="absolute" top={-BLEED_Y} right={-BLEED_X}>
                 <Svg source={top.right} alt="Band" width={CLASSIC_END} height={top.height} />
               </Box>
+              {updateDrawing}
               <Svg source={gap(16, LIFT)} alt="Band" width={16} height={LIFT} />
+              {updateButton}
             </Box>
           ) : null}
           <Box flexDirection="row" alignItems="center">
@@ -1963,13 +2120,24 @@ export const register: Register = on => {
         ]
       })
     const proj = await projectOf($)
-    const projectLine = proj ? (
-      <Box flexDirection="row">
-        <Text color={hexOf(proj.name)}>{'▍'}</Text>
-        <Text bold>{proj.name}</Text>
-        <Text dimColor>{`  ${proj.repo ? '⎇' : '▢'} ${branchLabel(proj)}${proj.worktree ? '  · worktree' : ''}`}</Text>
-      </Box>
-    ) : null
+    // The update notice stands at the right end of the project line: `● Update 0.2.0`, the press that takes it.
+    const words = note ? updateWords(note) : null
+    const projectLine =
+      proj || words ? (
+        <Box flexDirection="row">
+          {proj ? <Text color={hexOf(proj.name)}>{'▍'}</Text> : null}
+          {proj ? <Text bold>{proj.name}</Text> : null}
+          {proj ? <Text dimColor>{`  ${proj.repo ? '⎇' : '▢'} ${branchLabel(proj)}${proj.worktree ? '  · worktree' : ''}`}</Text> : null}
+          <Box flexGrow={1} />
+          {words && note ? (
+            <Button key="usage-bar-update" plain onPress={takeUpdate}>
+              <Text color={words.color}>{note.phase === 'updating' ? '◌' : '●'}</Text>
+              <Text bold dimColor={note.phase === 'updating'}>{` ${words.word}`}</Text>
+              <Text dimColor>{` ${words.version}`}</Text>
+            </Button>
+          ) : null}
+        </Box>
+      ) : null
     const finished = fam ? finishedOf(fam.children) : 0
     const familyBlock = fam ? (
       <Box flexDirection="column">

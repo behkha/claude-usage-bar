@@ -11,3 +11,6 @@
 
 # design prototypes, kept until their modes are ported into hooks/
 prototype/
+
+# a design tool's per-session cache
+.impeccable/hook.cache.json

@@ -61,6 +61,12 @@ export type UsageBarFlaps = { faces: Record<string, string>; was: Record<string,
 /** One reading of the context window's fill, after a main-loop turn. */
 export type UsageBarReading = { tokens: number; window: number; percent: number }
 
+/**
+ * The update notice this session shows: the newer version, where the update stands (Update, Updating, Restart,
+ * Retry), and when the notice appeared, epoch ms, for its arrival.
+ */
+export type UsageBarNotice = { version: string; phase: 'available' | 'updating' | 'restart' | 'failed'; since: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'usage-bar': {
@@ -72,12 +78,18 @@ declare module 'claude-code' {
       familyOpen: boolean
       mood: UsageBarMood | null
       fmOn: boolean
-      /** Which mode the band draws: `glass`, `cluster`, `tuner`, `board` or `classic`. */
+      /** Which mode the band draws, by its name in register.tsx's `SCENES` (`glass`, `lcd`, …). */
       scene: string
+      /** When the mode picker was opened, epoch ms; 0 while it is closed. */
+      picking: number
       ledger: UsageBarLedger | null
       project: UsageBarProject | null
       /** When the project or its branch last changed, epoch ms: the tab plays its arrival for a moment after. */
       projectSince: number
+      /** The update notice, or null when this copy is the newest. */
+      notice: UsageBarNotice | null
+      /** The version this session reloaded for: a reload that kept the old code turns the notice to Restart. */
+      reloadedFor: string | null
     }
   }
 }
